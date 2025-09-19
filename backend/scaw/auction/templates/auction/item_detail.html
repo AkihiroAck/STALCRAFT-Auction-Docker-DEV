@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% load static %}
+{% load edit_filters %}
+
+{% block title %}Продажи: {{ item.name }}{% endblock %}
+
+{% block head %}
+    <link rel="stylesheet" href="{% static 'auction/css/item_detail.css' %}">
+{% endblock %}
+
+{% block header %}
+    <div class="timezone-selector d-flex align-items-center ms-auto p-2 gap-2">
+        <label for="timezone-select">Часовой пояс:</label>
+        <select id="timezone-select" class="timezone-select form-select form-select-sm no-outline-shadow">
+            <option value="0">UTC+0</option>
+            <option value="3" selected>UTC+3 (Москва)</option>
+            <option value="4">UTC+4 (Баку)</option>
+            <option value="5">UTC+5 (Алматы)</option>
+        </select>
+    </div>
+{% endblock %}
+
+{% block content %}
+<div>
+    <!-- Заголовок и кнопки -->
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <div class="item-icon-container">
+                <img src="{% static 'auction/media/icons/'|add:item.category|add:'/'|add:item.item_id|add:'.png' %}" 
+                     alt="{{ item.name }}"
+                     class="item-icon"
+                     onerror="this.onerror=null; this.src='{% static 'auction/media/no_item_icon.png' %}'">
+            </div>
+
+            <h2 class="m-0">{{ item.name }}</h2>
+
+            <a href="https://stalcraft.wiki/items/{{ item.category|split_category|edit_category }}/{{ item.item_id|edit_item_id }}" 
+               class="btn btn-sm btn-outline-secondary" 
+               rel="noopener noreferrer">
+                stalcraft.wiki
+            </a>
+
+            <a href="https://stalcraftdb.net/ru/{{ item.item_id }}" 
+               class="btn btn-sm btn-outline-secondary" 
+               rel="noopener noreferrer">
+                stalcraftdb.net
+            </a>
+        </div>
+        
+        {% if item.item_id == 'sezonnyi_propusk' %}
+            <a href="{% url 'salehistory-create' item_id=item.item_id %}" 
+               class="btn btn-warning">
+                + Добавить запись
+            </a>
+        {% endif %}
+    </div>
+
+    <!-- Основные контролы -->
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+        <!-- Лимит записей -->
+        <div class="d-flex align-items-center gap-1">
+            <label for="items-limit" class="mb-0">Записей:</label>
+            <input class="form-control" style="width: 110px;" type="number" id="items-limit" step="50" min="0">
+            <button class="btn btn-green" id="apply-limit" type="button">Применить</button>
+        </div>
+        
+        <!-- Быстрые кнопки лимита -->
+        <div class="btn-group">
+            <button id="current-limit" class="btn btn-green" type="button" value="{{ max_limit }}">{{ max_limit }}</button>
+            <button id="current-limit" class="btn btn-green" type="button" value="2000">2000</button>
+            <button id="current-limit" class="btn btn-green" type="button" value="200">200</button>
+            <button id="current-limit" class="btn btn-green" type="button" value="100">100</button>
+            <button id="current-limit" class="btn btn-green" type="button" value="50">50</button>
+        </div>
+
+        <!-- Индикатор загрузки -->
+        <span id="loading-indicator" class="loading-indicator" style="display: none;">
+            <span class="spinner"></span>
+            <span>Загрузка...</span>
+        </span>
+    </div>
+
+    <!-- Фильтры цены -->
+    <div class="d-flex flex-wrap align-items-center gap-1 mb-3">
+        <label class="mb-0">Цена:</label>
+        <input type="number" class="form-control" style="width: 150px;" id="min-price" placeholder="От" step="1000" min="0">
+        <input type="number" class="form-control" style="width: 150px;" id="max-price" placeholder="До" step="1000" min="0">
+        <button class="btn btn-green" id="apply-price-filter" type="button">✓</button>
+        <button class="btn btn-outline-secondary" id="reset-price-filter" type="button">×</button>
+    </div>
+
+    {% if item.category|split_category == 'artefact' %}
+    <!-- Фильтры для артефактов -->
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+        <div class="d-flex align-items-center gap-1">
+            <label class="mb-0">Уровень:</label>
+            <input type="number" class="form-control" style="width: 90px;" id="min-ptn" placeholder="От" min="0" max="15">
+            <input type="number" class="form-control" style="width: 90px;" id="max-ptn" placeholder="До" min="0" max="15">
+            <button class="btn btn-green" id="apply-ptn-filter" type="button">✓</button>
+            <button class="btn btn-outline-secondary" id="reset-ptn-filter" type="button">×</button>
+        </div>
+        
+        <div class="d-flex align-items-center gap-1">
+            <label class="mb-0">Качество:</label>
+            <select class="form-select no-outline-shadow" style="width: 120px;" id="qlt-filter">
+                <option value="-1">Любое</option>
+                <option value="0">Обычный</option>
+                <option value="1">Необычный</option>
+                <option value="2">Особый</option>
+                <option value="3">Редкий</option>
+                <option value="4">Исключительный</option>
+                <option value="5">Легендарный</option>
+                <option value="6">Уникальный</option>
+            </select>
+            <button class="btn btn-outline-secondary" id="reset-qlt-filter" type="button">×</button>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Ползунок -->
+    <div class="chart-slider-container">
+        <div class="chart-slider-track"></div>
+        <div id="chart-slider-range" class="chart-slider-range"></div>
+    </div>
+    
+    <!-- График -->
+    <div id="chart-container" class="chart-container mb-3"
+         data-max-limit="{{ max_limit }}"
+         data-category="{{ item.category|split_category }}">
+        <svg id="salesChart"></svg>
+        <div id="tooltip" class="tooltip"></div>
+    </div>
+</div>
+
+<script src="{% static 'auction/js/item_detail.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,17 @@
+body {
+    margin: 0px 20px;
+}
+
+header a {
+    color: #333333;
+}
+
+.items-list a {
+    color: #333333;
+}
+
+/* Убрать выделение вокруг input */
+.form-control:focus {
+  border-color: #4b4b4b;
+  box-shadow: none;
+}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% load static %}
+
+{% block title %}Список предметов{% endblock %}
+
+{% block head %}
+    <link rel="stylesheet" href="{% static 'auction/css/items_list.css' %}">
+{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Список предметов</h2>
+
+<div class="search-container mb-4">
+    <div class="input-group">
+        <input type="text" id="search-input" class="form-control" placeholder="Введите название предмета, категории или item_id">
+        <button id="clear-search" class="btn btn-secondary" type="button">Очистить</button>
+    </div>
+</div>
+
+<table class="items-list table table-hover">
+    <thead>
+        <tr><th class="text-center" style="width: 50px;">ID</th><th>Название</th><th>Категория</th><th>ID Предмета</th></tr>
+    </thead>
+    <tbody id="items-container">
+        <tr>
+            <td colspan="4" class="text-center text-danger p-3"><noscript><b>Для работы требуется включить JavaScript</b></noscript></td>
+        </tr>
+    </tbody>
+</table>
+
+<div id="loading" class="text-center my-4" style="display: none;">
+    <div class="spinner-border text-dark" role="status">
+        <span class="visually-hidden">Загрузка...</span>
+    </div>
+</div>
+
+<script src="{% static 'auction/js/items_list.js' %}"></script>
+{% endblock %}

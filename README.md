@@ -1,2 +1,1 @@
 # STALCRAFT-Auction-Docker
-
