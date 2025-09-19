@@ -1,4 +1,3 @@
-
 from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
@@ -10,6 +9,7 @@ from django.views.generic import CreateView
 from django.shortcuts import render, get_object_or_404, redirect
 
 from .models import SaleHistory, Item
+from .constants import RANK_COLORS
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 
@@ -76,11 +76,11 @@ def item_list_view(request):
         data = {
             'items': [{
                 'id': item.id,
+                'item_id': item.item_id,
                 'name': item.name,
                 'category': item.category,
-                'item_id': item.item_id,
-                'url': reverse('item-detail', args=[item.item_id]),
-                'icon_url': f'/static/auction/media/icons/{item.category}/{item.item_id}.png'
+                'color': RANK_COLORS[item.color],
+                'url': reverse('item-detail', args=[item.item_id])
             } for item in page_obj],
             'has_next': page_obj.has_next()
         }
@@ -90,7 +90,6 @@ def item_list_view(request):
         'items': page_obj,
         'search_query': search
     })
-
 
 
 def item_detail_view(request, item_id):
@@ -123,8 +122,11 @@ def item_detail_view(request, item_id):
     # Если запрос AJAX - возвращаем JSON
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         # Преобразуем QuerySet в список словарей для JSON
-        sales = list(sales.values('id', 'price', 'time', 'extra_data', 'item__name'))
-        return JsonResponse({'sales': sales})
+        sales = list(sales.values('id', 'price', 'time', 'extra_data', 'item__name', 'item__color'))
+        return JsonResponse({
+            'sales': sales,
+            'colors': RANK_COLORS,
+        })
     
     # Если не AJAX - возвращаем HTML-шаблон
     return render(request, 'auction/item_detail.html', {

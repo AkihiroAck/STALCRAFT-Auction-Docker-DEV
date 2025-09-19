@@ -2,6 +2,7 @@
 
 {% load static %}
 {% load edit_filters %}
+{% load rank_colors %}
 
 {% block title %}Продажи: {{ item.name }}{% endblock %}
 
@@ -26,8 +27,8 @@
     <!-- Заголовок и кнопки -->
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div class="d-flex align-items-center gap-2">
-            <div class="item-icon-container">
-                <img src="{% static 'auction/media/icons/'|add:item.category|add:'/'|add:item.item_id|add:'.png' %}" 
+            <div class="item-icon-container" style="border-color: {{ item.color|rank_color }}">
+                <img src="https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{{ item.category }}/{{ item.item_id }}.png"
                      alt="{{ item.name }}"
                      class="item-icon"
                      onerror="this.onerror=null; this.src='{% static 'auction/media/no_item_icon.png' %}'">

@@ -58,8 +58,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td class="text-center">${item.id}</td>
                         <td>
                             <a href="${item.url}" class="text-decoration-none d-flex align-items-center gap-2">
-                                <div class="item-icon-container">
-                                    <img src="${item.icon_url}" 
+                                <div class="item-icon-container" style="border-color: ${item.color}">
+                                    <img src="https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/${item.category}/${item.item_id}.png"
                                         alt="${item.name}"
                                         class="item-icon"
                                         loading="lazy"

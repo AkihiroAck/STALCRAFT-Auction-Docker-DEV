@@ -121,20 +121,24 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Получаем текущий часовой пояс (0 если еще не инициализирован)
             const timezoneOffset = timezoneSelect ? parseInt(timezoneSelect.value) || 0 : 0;
-            
+
+            const color = data.colors
+
             const newData = data.sales.map(item => {
                 const date = new Date(item.time);
                 date.setHours(date.getHours() + timezoneOffset);
-                
                 return {
                     time: date.getTime(),
                     price: item.price,
                     name: item.item__name,
-                    qlt: item.extra_data.qlt || 0,
-                    ptn: item.extra_data.ptn || 0,
+                    ...(item.extra_data.qlt !== undefined && { qlt: item.extra_data.qlt }),
+                    ...(item.extra_data.ptn !== undefined && { ptn: item.extra_data.ptn }),
                     timeStr: date.toISOString().replace('T', ' ').slice(0, 19),
                     extra_data: item.extra_data,
-                    timezoneOffset: timezoneOffset
+                    timezoneOffset: timezoneOffset,
+                    color: item.extra_data.qlt !== undefined
+                        ? Object.values(color)[Math.min(item.extra_data.qlt, 6)]
+                        : color[item.item__color]
                 };
             });
 
@@ -368,20 +372,11 @@ document.addEventListener('DOMContentLoaded', function() {
         salesData.forEach(item => {
             const x = xScale(item.time);
             const y = yScale(item.price);
-            const qlt0 = '#666666';
-            const qlt1 = '#00c718';
-            const qlt2 = '#4d66ff';
-            const qlt3 = '#e000be';
-            const qlt4 = '#ff2c1a';
-            const qlt5 = '#f9ff1a';
-            const qlt6 = '#f5b200';
-            const color = [qlt0,qlt1,qlt2,qlt3,qlt4,qlt5,qlt6][Math.min(item.qlt, 6)];
-
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("cx", x);
             circle.setAttribute("cy", y);
             circle.setAttribute("r", "5");
-            circle.setAttribute("fill", color);
+            circle.setAttribute("fill", item.color);
             circle.setAttribute("class", "data-point");
 
             // Показать подсказку
@@ -391,7 +386,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 tooltip.innerHTML = `
                     <div class="tooltip-title">${item.name}${item.ptn ? ` +${item.ptn}` : ''}</div>
-                    <hr class="tooltip-rank-hr" style="color: ${color};">
+                    <hr class="tooltip-rank-hr" style="color: ${item.color};">
                     <div>${item.timeStr}</div>
                     <div>${Number(item.price).toLocaleString('ru-RU')} руб.</div>
                     <hr style="margin: 5px 0">

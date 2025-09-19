@@ -3,6 +3,7 @@ import time
 import requests
 import os
 import json
+import base64
 from dotenv import load_dotenv
 from auction.models import SaleHistory, Item
 from django.utils.dateparse import parse_datetime
@@ -15,6 +16,7 @@ load_dotenv()
 
 STALCRAFT_CLIENT_ID = os.getenv('STALCRAFT_CLIENT_ID')
 STALCRAFT_CLIENT_SECRET = os.getenv('STALCRAFT_CLIENT_SECRET')
+STALCRAFT_DATABASE_LISTING = os.getenv('STALCRAFT_DATABASE_LISTING')
 
 SC_HEADERS = {
     'Content-Type': 'application/json',
@@ -200,3 +202,117 @@ def delete_old_sales():
         deleted_count, _ = old_sales.delete()
         print(f"INFO: delete_old_sales Удалено {deleted_count} старых записей о продажах.")
         return f"FINISH: Задача удаления старых данных по истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+
+
+@shared_task
+def sync_github_items_daily():
+    """Ежедневная синхронизация предметов из GitHub с массовой обработкой"""
+
+    time_start = time.time()
+
+    try:
+        url = STALCRAFT_DATABASE_LISTING
+        response = requests.get(url)
+
+        if response.status_code != 200:
+            print(f"ERROR: Ошибка запроса: {response.status_code}")
+            return False
+
+        data = response.json()
+
+        # Декодируем base64 контент
+        content = base64.b64decode(data['content']).decode('utf-8')
+        items_data = json.loads(content)
+
+        # Подготавливаем данные для массовой обработки
+        processed_data = []
+        for item_info in items_data:
+            try:
+                item_path = item_info['data']
+
+                item_id = item_path.split('/')[-1].replace('.json', '')
+                name = item_info['name']['lines']['ru']
+                name_key = item_info['name']['key']
+                category = '/'.join(item_path.split('/')[2:-1])
+                color = item_info.get('color', 'DEFAULT')
+
+                processed_data.append({
+                    'item_id': item_id,
+                    'name': name,
+                    'name_key': name_key,
+                    'category': category,
+                    'color': color,
+
+                })
+
+            except Exception as e:
+                print(f"ERROR: Ошибка обработки предмета {item_info}: {e}")
+                continue
+
+        # Массовая обработка данных
+        create_or_update_items(processed_data)
+
+        print(f"INFO: Синхронизация завершена. Обработано {len(processed_data)} предметов.")
+        return f"FINISH: Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+
+    except Exception as e:
+        print(f"ERROR: Ошибка синхронизации: {e}")
+        return False
+
+
+def create_or_update_items(items_data):
+    """
+    Массово создает/обновляет объекты Item
+    """
+    with transaction.atomic():
+        # Создаем словарь для быстрого доступа к данным по item_id
+        items_map = {
+            item['item_id']: item
+            for item in items_data
+            if 'item_id' in item
+        }
+
+        # Получаем существующие записи
+        existing_items = Item.objects.in_bulk(field_name='item_id')
+
+        # Подготавливаем списки для массовых операций
+        to_create = []
+        to_update = []
+
+        # Обрабатываем каждый элемент
+        for item_id, data in items_map.items():
+            if item_id not in existing_items:
+                # Новый предмет
+                to_create.append(Item(
+                    item_id=item_id,
+                    name=data['name'],
+                    name_key=data['name_key'],
+                    category=data['category'],
+                    color=data['color']
+                ))
+                print(f"INFO: Добавлен новый предмет: {data['name']} ({item_id})")
+            else:
+                # Существующий предмет - проверяем изменения
+                existing_item = existing_items[item_id]
+                needs_update = (
+                        existing_item.name != data['name'] or
+                        existing_item.name_key != data['name_key'] or
+                        existing_item.category != data['category'] or
+                        existing_item.color != data['color']
+                )
+
+                if needs_update:
+                    existing_item.name = data['name']
+                    existing_item.name_key = data['name_key']
+                    existing_item.category = data['category']
+                    existing_item.color = data['color']
+                    to_update.append(existing_item)
+                    print(f"INFO: Обновлен предмет: {data['name']} ({item_id})")
+
+        # Выполняем массовые операции
+        if to_create:
+            Item.objects.bulk_create(to_create)
+        if to_update:
+            Item.objects.bulk_update(to_update, ['name', 'name_key', 'category', 'color'])
+
+        print(f"Создано: {len(to_create)}, Обновлено: {len(to_update)}")

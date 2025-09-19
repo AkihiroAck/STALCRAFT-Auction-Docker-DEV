@@ -60,7 +60,7 @@ services:
       - redis
       - web
     entrypoint: /usr/src/app/entrypoint_celery.sh
-#    command: celery -A scaw worker -l INFO --pool=solo
+    command: celery -A scaw worker -l INFO --pool=solo
 
   celery_beat:
     build: ./backend
@@ -74,7 +74,7 @@ services:
       - redis
       - web
     entrypoint: /usr/src/app/entrypoint_celery.sh
-#    command: celery -A scaw beat -l INFO
+    command: celery -A scaw beat -l INFO
 
 volumes:
   postgres_data:

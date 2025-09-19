@@ -3,8 +3,10 @@ from django.db import models
 
 class Item(models.Model):
     item_id = models.CharField(max_length=100, unique=True)  # Уникальный ID предмета
-    name = models.CharField(max_length=255)  # Название предмета
+    name = models.CharField(max_length=255)  # Название
+    name_key = models.CharField(max_length=255)  # Переменное
     category = models.CharField(max_length=255)  # Категория
+    color = models.CharField(max_length=255)  # Цвет
     
     def __str__(self):
         return self.name
