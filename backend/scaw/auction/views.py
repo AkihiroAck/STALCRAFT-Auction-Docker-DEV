@@ -135,11 +135,6 @@ def item_detail_view(request, item_id):
     })
 
 
-import datetime
-from django.db import connection
-from django.utils.timezone import now
-from django.http import HttpResponse
-
 def process_lang_file(request):
     """
     Обработка загруженного ru.lang файла:
@@ -176,10 +171,10 @@ def process_lang_file(request):
         WITH filtered AS (
             SELECT sh.item_id, sh.price
             FROM auction_salehistory sh
+            JOIN auction_item i ON sh.item_id = i.id
             WHERE sh.item_id = ANY(%s)
               AND sh.time >= %s
-              AND (sh.extra_data ? 'qlt') = FALSE
-              AND (sh.extra_data ? 'ptn') = FALSE
+              AND i.category NOT LIKE 'artefact%%'
         ),
         bounds AS (
             SELECT item_id,
@@ -208,10 +203,10 @@ def process_lang_file(request):
         query_last = """
             SELECT DISTINCT ON (sh.item_id) sh.item_id, sh.price
             FROM auction_salehistory sh
+            JOIN auction_item i ON sh.item_id = i.id
             WHERE sh.item_id = ANY(%s)
               AND sh.time < %s
-              AND (sh.extra_data ? 'qlt') = FALSE
-              AND (sh.extra_data ? 'ptn') = FALSE
+              AND i.category NOT LIKE 'artefact%%'
             ORDER BY sh.item_id, sh.time DESC;
         """
         with connection.cursor() as cursor:
@@ -220,6 +215,7 @@ def process_lang_file(request):
         for item_id, price in rows:
             prices_map[item_id] = price  # последняя цена
 
+    # --- сборка выходного файла ---
     for line in lines:
         if "=" not in line:
             continue
@@ -235,8 +231,6 @@ def process_lang_file(request):
     response = HttpResponse("\n".join(output_lines), content_type="text/plain; charset=utf-8")
     response["Content-Disposition"] = 'attachment; filename="ru.lang"'
     return response
-
-
 
 
 def upload_lang_page(request):
