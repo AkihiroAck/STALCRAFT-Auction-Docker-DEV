@@ -1,17 +1,19 @@
+import datetime
 from django.db.models import Q
+from django.db import connection
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib import messages
-from django.http import JsonResponse
-from .forms import SaleHistoryCreateForm
+from django.http import JsonResponse, HttpResponse
 from django.core.paginator import Paginator
 from django.views.generic import CreateView
 from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib.auth.mixins import LoginRequiredMixin
 
 from .models import SaleHistory, Item
+from .forms import SaleHistoryCreateForm
 from .constants import RANK_COLORS
 
-from django.contrib.auth.mixins import LoginRequiredMixin
 
 
 class SaleHistoryCreateView(CreateView):
@@ -150,7 +152,7 @@ def process_lang_file(request):
     # Сколько месяцев брать (по умолчанию 1, максимум 3)
     months = int(request.POST.get("months", 1))
     months = max(1, min(3, months))
-    date_from = now() - datetime.timedelta(days=30 * months)
+    date_from = timezone.now() - datetime.timedelta(days=30 * months)
 
     file = request.FILES["file"]
     lines = file.read().decode("utf-8").splitlines()
