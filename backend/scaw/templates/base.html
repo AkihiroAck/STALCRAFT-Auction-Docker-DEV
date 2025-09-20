@@ -14,18 +14,26 @@
 <body>
     <header class="pt-3 mb-2">
         <div class="d-flex justify-content-between align-items-center">
+            <!-- Левая часть: логотип и навигация -->
             <div class="d-flex align-items-center">
-                <h1 class="m-0"><a class="text-decoration-none" href="/">Главная</a></h1>
-                {% comment %} <nav class="ms-4">
-                    <a href="{% url 'item-list' %}" class="text-decoration-none">Список предметов</a>
-                    <!-- другие ссылки -->
-                </nav> {% endcomment %}
+                <h2 class="m-0">
+                    <a class="text-decoration-none" href="/">Главная</a>
+                </h2>
+
+                <nav class="ms-4 d-flex align-items-center">
+                    <a href="{% url 'upload_lang' %}" class="text-decoration-none me-3">AVG to lang</a>
+                    <!-- Можно добавить другие ссылки здесь -->
+                </nav>
             </div>
-                
-            {% block header %}{% endblock %}
+
+            <!-- Правая часть: дополнительный блок -->
+            <div class="d-flex align-items-center">
+                {% block header %}{% endblock %}
+            </div>
         </div>
-            <hr>
+        <hr>
     </header>
+
 
     <!-- Здесь будут подставляться разные страницы -->
     <main>

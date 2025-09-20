@@ -133,3 +133,111 @@ def item_detail_view(request, item_id):
         'item': item,
         'max_limit': MAX_LIMIT,
     })
+
+
+import datetime
+from django.db import connection
+from django.utils.timezone import now
+from django.http import HttpResponse
+
+def process_lang_file(request):
+    """
+    Обработка загруженного ru.lang файла:
+    - берём все name_key из файла
+    - ищем Item по этим ключам
+    - считаем среднюю цену за последние N месяцев (через SQL)
+    - если продаж нет, используем последнюю доступную цену до указанного периода
+    - возвращаем новый файл с добавленными строками
+    """
+    if request.method != "POST" or "file" not in request.FILES:
+        return HttpResponse("Загрузите файл методом POST с полем 'file'", status=400)
+
+    # Сколько месяцев брать (по умолчанию 1, максимум 3)
+    months = int(request.POST.get("months", 1))
+    months = max(1, min(3, months))
+    date_from = now() - datetime.timedelta(days=30 * months)
+
+    file = request.FILES["file"]
+    lines = file.read().decode("utf-8").splitlines()
+    output_lines = lines.copy()
+    output_lines.append("")  # пустая строка-разделитель
+
+    # все ключи вида item.wpn.xxx.name
+    keys = [line.split("=", 1)[0] for line in lines if "=" in line]
+
+    # загрузка Items одним запросом
+    items = Item.objects.filter(name_key__in=keys).values("id", "name_key")
+    items_map = {i["id"]: i["name_key"] for i in items}
+    if not items_map:
+        return HttpResponse("В файле нет предметов из базы", status=400)
+
+    # --- основной запрос: средняя цена за N месяцев ---
+    query_avg = """
+        WITH filtered AS (
+            SELECT sh.item_id, sh.price
+            FROM auction_salehistory sh
+            WHERE sh.item_id = ANY(%s)
+              AND sh.time >= %s
+              AND (sh.extra_data ? 'qlt') = FALSE
+              AND (sh.extra_data ? 'ptn') = FALSE
+        ),
+        bounds AS (
+            SELECT item_id,
+                   percentile_cont(0.25) WITHIN GROUP (ORDER BY price) AS q1,
+                   percentile_cont(0.75) WITHIN GROUP (ORDER BY price) AS q3
+            FROM filtered
+            GROUP BY item_id
+        )
+        SELECT f.item_id, AVG(f.price) AS avg_price
+        FROM filtered f
+        JOIN bounds b ON f.item_id = b.item_id
+        WHERE f.price BETWEEN (b.q1 - 4 * (b.q3 - b.q1))
+                          AND (b.q3 + 4 * (b.q3 - b.q1))
+        GROUP BY f.item_id;
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(query_avg, [list(items_map.keys()), date_from])
+        rows = cursor.fetchall()
+
+    prices_map = {item_id: avg for item_id, avg in rows}
+
+    # --- fallback: последняя продажа до периода ---
+    missing_ids = [i for i in items_map.keys() if i not in prices_map]
+    if missing_ids:
+        query_last = """
+            SELECT DISTINCT ON (sh.item_id) sh.item_id, sh.price
+            FROM auction_salehistory sh
+            WHERE sh.item_id = ANY(%s)
+              AND sh.time < %s
+              AND (sh.extra_data ? 'qlt') = FALSE
+              AND (sh.extra_data ? 'ptn') = FALSE
+            ORDER BY sh.item_id, sh.time DESC;
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(query_last, [missing_ids, date_from])
+            rows = cursor.fetchall()
+        for item_id, price in rows:
+            prices_map[item_id] = price  # последняя цена
+
+    for line in lines:
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        item_id = next((id_ for id_, k in items_map.items() if k == key), None)
+        if not item_id:
+            continue
+        avg_price = prices_map.get(item_id)
+        if avg_price:
+            formatted_price = f"{int(avg_price):,}".replace(",", " ")
+            output_lines.append(f"{key}={value}\\n{formatted_price} руб.")
+
+    response = HttpResponse("\n".join(output_lines), content_type="text/plain; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="ru.lang"'
+    return response
+
+
+
+
+def upload_lang_page(request):
+    return render(request, "auction/upload_lang.html")

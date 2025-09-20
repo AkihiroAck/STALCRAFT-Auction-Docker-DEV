@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.db import transaction
 
 
+
 load_dotenv()
 
 STALCRAFT_CLIENT_ID = os.getenv('STALCRAFT_CLIENT_ID')
@@ -113,7 +114,7 @@ def start_get_history():
     # Перезапускаем всю задачу через 1 секунд
     start_get_history.apply_async(countdown=1)
     
-    return f"FINISH: Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+    return f"FINISH: start_get_history Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
 
 
 def save_sale_history(item, lots, total_items, current_count):
@@ -201,7 +202,7 @@ def delete_old_sales():
         old_sales = SaleHistory.objects.filter(time__lt=older_limit)
         deleted_count, _ = old_sales.delete()
         print(f"INFO: delete_old_sales Удалено {deleted_count} старых записей о продажах.")
-        return f"FINISH: Задача удаления старых данных по истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+        return f"FINISH: delete_old_sales Задача удаления старых данных по истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
 
 
 @shared_task
@@ -215,7 +216,7 @@ def sync_github_items_daily():
         response = requests.get(url)
 
         if response.status_code != 200:
-            print(f"ERROR: Ошибка запроса: {response.status_code}")
+            print(f"ERROR: sync_github_items_daily Ошибка запроса: {response.status_code}")
             return False
 
         data = response.json()
@@ -246,17 +247,16 @@ def sync_github_items_daily():
                 })
 
             except Exception as e:
-                print(f"ERROR: Ошибка обработки предмета {item_info}: {e}")
+                print(f"ERROR: sync_github_items_daily Ошибка обработки предмета {item_info}: {e}")
                 continue
 
         # Массовая обработка данных
         create_or_update_items(processed_data)
 
-        print(f"INFO: Синхронизация завершена. Обработано {len(processed_data)} предметов.")
-        return f"FINISH: Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+        return f"FINISH: sync_github_items_daily Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
 
     except Exception as e:
-        print(f"ERROR: Ошибка синхронизации: {e}")
+        print(f"ERROR: sync_github_items_daily Ошибка синхронизации: {e}")
         return False
 
 
@@ -290,7 +290,7 @@ def create_or_update_items(items_data):
                     category=data['category'],
                     color=data['color']
                 ))
-                print(f"INFO: Добавлен новый предмет: {data['name']} ({item_id})")
+                print(f"INFO: create_or_update_items ДОБАВЛЕН: {data['name']} ({item_id})")
             else:
                 # Существующий предмет - проверяем изменения
                 existing_item = existing_items[item_id]
@@ -307,7 +307,7 @@ def create_or_update_items(items_data):
                     existing_item.category = data['category']
                     existing_item.color = data['color']
                     to_update.append(existing_item)
-                    print(f"INFO: Обновлен предмет: {data['name']} ({item_id})")
+                    print(f"INFO: create_or_update_items ОБНОВЛЕН: {data['name']} ({item_id})")
 
         # Выполняем массовые операции
         if to_create:
@@ -315,4 +315,4 @@ def create_or_update_items(items_data):
         if to_update:
             Item.objects.bulk_update(to_update, ['name', 'name_key', 'category', 'color'])
 
-        print(f"Создано: {len(to_create)}, Обновлено: {len(to_update)}")
+        print(f"INFO: create_or_update_items needs_update СОЗДАНО: {len(to_create)}, ОБНОВЛЕНО: {len(to_update)}")

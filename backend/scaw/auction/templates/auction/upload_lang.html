@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Загрузка ru.lang{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h3 class="mb-3">Загрузите ru.lang файл</h3>
+    <form action="{% url 'process_lang' %}?months=1" method="post" enctype="multipart/form-data" class="d-flex gap-3 mb-3 align-items-center">
+        {% csrf_token %}
+        <input type="file" name="file" class="form-control w-auto" required>
+
+        <label for="months" class="form-label mb-0">Месяцы:</label>
+        <select name="months" id="months" class="form-select w-auto">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+        </select>
+
+        <button type="submit" class="btn btn-primary btn-lg">Обработать</button>
+    </form>
+</div>
+{% endblock %}
