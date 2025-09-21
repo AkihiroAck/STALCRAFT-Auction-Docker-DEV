@@ -27,11 +27,11 @@
 ---
 
 ### Доступные страницы:
-- [/auction/items/](www.localhost:8000/auction/items/) - Список всех предметов.
+- [/auction/items/](http://localhost:8000/auction/items/) - Список всех предметов.
 
-- [/auction/items/<item_id>/](www.localhost:8000/auction/items/9mmq/) - Информация о продажах определённого предмета.
+- [/auction/items/<item_id>/](http://localhost:8000/auction/items/9mmq/) - Информация о продажах определённого предмета.
 
-- [/auction/upload-lang/](www.localhost:8000/auction/upload-lang/) - Пользователь загружает файл предметов из игры и получает обратно файл с добавленными средними ценами за выбранный период.
+- [/auction/upload-lang/](http://localhost:8000/auction/upload-lang/) - Пользователь загружает файл предметов из игры и получает обратно файл с добавленными средними ценами за выбранный период.
 
 ---
 
