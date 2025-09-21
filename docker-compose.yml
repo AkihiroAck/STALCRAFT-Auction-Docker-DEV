@@ -60,7 +60,7 @@ services:
       - redis
       - web
     entrypoint: /usr/src/app/entrypoint_celery.sh
-    command: celery -A scaw worker -l INFO --pool=solo
+    command: celery -A scaw worker -l INFO
 
   celery_beat:
     build: ./backend
