@@ -180,3 +180,6 @@ celerybeat-schedule.dat
 celerybeat-schedule.dir
 #  Игнорировать файл резервной копии celery_broker.sqlite
 celery_broker.sqlite
+
+# Ignore collected static files
+staticfiles/

@@ -1,10 +1,10 @@
-from celery import shared_task
 import time
 import requests
 import os
 import json
 import base64
 from dotenv import load_dotenv
+from celery import shared_task
 from auction.models import SaleHistory, Item
 from django.utils.dateparse import parse_datetime
 from datetime import timedelta

@@ -11,7 +11,7 @@ services:
     depends_on:
       - db
       - redis
-    entrypoint: /usr/src/app/entrypoint.sh
+    entrypoint: /usr/src/app/entrypoint_web.sh
 
   db:
     image: postgres:17.4
