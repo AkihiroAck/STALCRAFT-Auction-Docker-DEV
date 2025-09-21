@@ -27,30 +27,22 @@
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div class="d-flex align-items-center gap-2">
             <div class="item-icon-container" style="border-color: {{ item.color|rank_color }}">
-                <img src="https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{{ item.category }}/{{ item.item_id }}.png"
-                     alt="{{ item.name }}"
-                     class="item-icon"
-                     onerror="this.onerror=null; this.src='{% static 'auction/media/no_item_icon.png' %}'">
+                <img src="https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{{ item.category }}/{{ item.item_id }}.png" alt="{{ item.name }}" class="item-icon" onerror="this.onerror=null; this.src='{% static 'auction/media/no_item_icon.png' %}'">
             </div>
 
             <h2 class="m-0">{{ item.name }}</h2>
 
-            <a href="https://stalcraft.wiki/items/{{ item.category|split_category|edit_category }}/{{ item.item_id|edit_item_id }}" 
-               class="btn btn-sm btn-outline-secondary" 
-               rel="noopener noreferrer">
+            <a href="https://stalcraft.wiki/items/{{ item.category|split_category|edit_category }}/{{ item.item_id|edit_item_id }}" class="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">
                 stalcraft.wiki
             </a>
 
-            <a href="https://stalcraftdb.net/ru/{{ item.item_id }}" 
-               class="btn btn-sm btn-outline-secondary" 
-               rel="noopener noreferrer">
+            <a href="https://stalcraftdb.net/ru/{{ item.item_id }}" class="btn btn-sm btn-outline-secondary" rel="noopener noreferrer">
                 stalcraftdb.net
             </a>
         </div>
         
         {% if item.item_id == 'sezonnyi_propusk' %}
-            <a href="{% url 'salehistory-create' item_id=item.item_id %}" 
-               class="btn btn-warning">
+            <a href="{% url 'salehistory-create' item_id=item.item_id %}" class="btn btn-warning">
                 + Добавить запись
             </a>
         {% endif %}
@@ -125,9 +117,7 @@
     </div>
     
     <!-- График -->
-    <div id="chart-container" class="chart-container mb-3"
-         data-max-limit="{{ max_limit }}"
-         data-category="{{ item.category|split_category }}">
+    <div id="chart-container" class="chart-container mb-3" data-max-limit="{{ max_limit }}" data-category="{{ item.category|split_category }}">
         <svg id="salesChart"></svg>
         <div id="tooltip" class="tooltip"></div>
     </div>
