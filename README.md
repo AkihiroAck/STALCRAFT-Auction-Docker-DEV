@@ -49,7 +49,7 @@
 ### 1. Клонирование репозитория
 Склонируйте репозиторий на ваш локальный компьютер:
 ```bash
-git clone https://github.com/your-repo/STALCRAFT-Auction-Docker.git
+git clone https://github.com/AkihiroAck/STALCRAFT-Auction-Docker.git
 cd STALCRAFT-Auction-Docker
 ```
 
