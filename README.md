@@ -59,7 +59,7 @@ cd STALCRAFT-Auction-Docker
 ```
 
 ### 2. Настройка переменных окружения
-Создайте файл .env в корневой папке (рядом с `docker-compose.yml`) и настройте его под ваши нужды:
+Создайте файл .env в корневой папке (рядом с [`docker-compose.yml`](docker-compose.yml)) и настройте его под ваши нужды:
 ```
 # Django
 SECRET_KEY=django-insecure-key
@@ -113,7 +113,7 @@ docker-compose build --no-cache && docker-compose up -d
 - pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в .env)
 
 ### 4. Миграции базы данных и collectstatic
-Миграции и collectstatic выполняются автоматически с помощью `backend\entrypoint_web.sh`
+Миграции и collectstatic выполняются автоматически с помощью [`backend/entrypoint_web.sh`](backend/entrypoint_web.sh)
 ```bash
 python manage.py makemigrations
 python manage.py migrate
@@ -123,7 +123,7 @@ gunicorn scaw.wsgi:application --bind 0.0.0.0:8000
 
 ### 5. Celery
 Celery запускается автоматически с помощью `command` в `docker-compose.yml`.
-Запускается после миграции. Проверка миграции происходит в `backend\entrypoint_celery.sh` с помощью `backend\wait_for_migrations.py`
+Запускается после миграции. Проверка миграции происходит в [`backend/entrypoint_celery.sh`](backend/entrypoint_celery.sh) с помощью [`backend/wait_for_migrations.py`](backend/wait_for_migrations.py)
 
 Celery используется для фоновых задач, таких как: 
 - **Синхронизация данных (`sync_github_items_daily`)** - Проверяет наличие новых или обновленных предметов с помощью api запроса `STALCRAFT_DATABASE_LISTING`. Запускается при первом запуске проекта и каждый день 16:00 (UTC+0) и сохраняет их в базу данных.
@@ -165,7 +165,7 @@ docker-compose down -v
   - **entrypoint_celery.sh** — скрипт запуска Celery внутри контейнера.
   - **entrypoint_web.sh** — скрипт запуска веб-приложения (Django + Gunicorn).
   - **requirements.txt** — список зависимостей Python-пакетов.
-  - **wait_for_migrations.py** — вспомогательный скрипт, который дожидается применения миграций перед запуском Celery (используется в `backend\entrypoint_celery.sh`).
+  - **wait_for_migrations.py** — вспомогательный скрипт, который дожидается применения миграций перед запуском Celery (используется в [`backend/entrypoint_celery.sh`](backend/entrypoint_celery.sh)).
 - **docker-compose.yml** — конфигурация для запуска всех сервисов (PostgreSQL, Redis, backend, Celery) через Docker Compose.
 - **.env** — файл с переменными окружения (секреты, ключи, настройки БД и др.).
 
