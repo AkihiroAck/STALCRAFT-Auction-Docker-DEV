@@ -158,7 +158,7 @@ docker-compose down -v
   - **entrypoint_celery.sh** — скрипт запуска Celery внутри контейнера.
   - **entrypoint_web.sh** — скрипт запуска веб-приложения (Django + Gunicorn).
   - **requirements.txt** — список зависимостей Python-пакетов.
-  - **wait_for_migrations.py** — вспомогательный скрипт, который дожидается применения миграций перед запуском Celery (используется в `entrypoint_celery.sh`).
+  - **wait_for_migrations.py** — вспомогательный скрипт, который дожидается применения миграций перед запуском Celery (используется в `backend\entrypoint_celery.sh`).
 - **docker-compose.yml** — конфигурация для запуска всех сервисов (PostgreSQL, Redis, backend, Celery) через Docker Compose.
 - **.env** — файл с переменными окружения (секреты, ключи, настройки БД и др.).
 
