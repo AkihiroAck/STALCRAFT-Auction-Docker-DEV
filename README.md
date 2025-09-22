@@ -113,7 +113,7 @@ docker-compose build --no-cache && docker-compose up -d
 - pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в .env)
 
 ### 4. Миграции базы данных и collectstatic
-Миграции и collectstatic выполняются автоматически с помощью `backend\entrypoint_web.sh`
+Миграции и collectstatic выполняются автоматически с помощью `backend\entrypoint_web.sh`[backend\entrypoint_web.sh](backend\entrypoint_web.sh)
 ```bash
 python manage.py makemigrations
 python manage.py migrate
