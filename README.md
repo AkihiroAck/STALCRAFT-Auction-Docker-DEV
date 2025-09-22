@@ -40,7 +40,7 @@
 ## Требования
 
 Для запуска проекта вам понадобятся:
-- **Docker** и **Docker Compose**
+- [**Docker**](https://www.docker.com/get-started/)
 
 ---
 
