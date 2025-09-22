@@ -65,6 +65,8 @@ def get_history(item, additional: str = 'false', limit: str = '20', offset: str 
 
             if response.status_code != 200:  # Если не успешный статус ответа
                 print(f'ERROR: get_history (response.status_code != 200) {item.name} [{item.item_id}]: {response_json}')
+                time.sleep(5)
+                continue  # Повторить запрос
 
             return response_json
         except requests.exceptions.RequestException as e:

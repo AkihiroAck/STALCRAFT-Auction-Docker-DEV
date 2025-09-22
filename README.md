@@ -66,7 +66,7 @@ STALCRAFT_DATABASE_LISTING=https://api.github.com/repos/EXBO-Studio/stalcraft-da
 # PostgreSQL
 POSTGRES_DATABASE_NAME=POSTGRESQL_DATABASE_NAME
 POSTGRES_USERNAME=db_user
-POSTGRES_USER_PASSWORD=db_password
+POSTGRES_PASSWORD=db_password
 POSTGRES_HOST=db
 POSTGRES_PORT=5432
 
@@ -102,8 +102,8 @@ docker-compose build --no-cache && docker-compose up -d
 ```
 
 После успешного запуска:
-- Приложение будет доступно по адресу: www.localhost:8000
-- pgAdmin: www.localhost:5050 (логин и пароль указаны в .env)
+- Приложение будет доступно по адресу: [localhost:8000](http://localhost:8000) (список предметов)
+- pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в .env)
 
 ### 4. Миграции базы данных и collectstatic
 Миграции и collectstatic выполняются автоматически с помощью `backend\entrypoint_web.sh`
@@ -152,6 +152,8 @@ docker-compose down -v
     - **static/** — статические файлы проекта (CSS, JS, изображения).
     - **templates/** — HTML-шаблоны для отображения страниц.
     - **manage.py** — основной скрипт для управления Django (миграции, запуск сервера, команды).
+  - **auction_item.sql** — SQL-файл с начальными данными предметов, используется для первичного наполнения базы при первом запуске.
+  - **auction_salehistory.sql** — SQL-файл с историей продаж предметов, используется для первичного наполнения базы при первом запуске.
   - **Dockerfile** — инструкция сборки Docker-образа для backend.
   - **entrypoint_celery.sh** — скрипт запуска Celery внутри контейнера.
   - **entrypoint_web.sh** — скрипт запуска веб-приложения (Django + Gunicorn).
@@ -163,5 +165,4 @@ docker-compose down -v
 ---
 
 ## API интеграция
-Приложение интегрируется с игровым проектом STALCRAFT через API. Данные о продажах синхронизируются ежедневно с помощью цикличной задачи Celery. Для настройки API используйте переменные STALCRAFT_CLIENT_ID, STALCRAFT_CLIENT_SECRET в .env.
-
+Приложение интегрируется с игровым проектом STALCRAFT через API. Данные о продажах синхронизируются ежедневно с помощью цикличной задачи Celery. Для настройки API используйте переменные `STALCRAFT_CLIENT_ID`, `STALCRAFT_CLIENT_SECRET` в .env. Без них от функции в Celery `start_get_history` вы получите ошибку - `{'title': 'Unauthorized', 'status': 401, 'details': {}}`

@@ -8,5 +8,5 @@ RUN sed -i 's/\r$//g' /usr/src/app/entrypoint_web.sh
 RUN sed -i 's/\r$//g' /usr/src/app/entrypoint_celery.sh
 RUN chmod +x /usr/src/app/entrypoint_web.sh
 RUN chmod +x /usr/src/app/entrypoint_celery.sh
+RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
 EXPOSE 8000
-#ENTRYPOINT ["/usr/src/app/entrypoint.sh"]
