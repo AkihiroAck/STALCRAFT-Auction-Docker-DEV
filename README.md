@@ -117,7 +117,7 @@ docker-compose build --no-cache && docker-compose up -d
 ```bash
 python manage.py makemigrations
 python manage.py migrate
-python manage.py collectstatic --noinput --clear
+python manage.py collectstatic --noinput
 gunicorn scaw.wsgi:application --bind 0.0.0.0:8000
 ```
 
