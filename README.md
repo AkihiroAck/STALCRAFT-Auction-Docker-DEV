@@ -116,7 +116,7 @@ docker-compose up -d
 
 После успешного запуска:
 - Приложение будет доступно по адресу: [localhost:8000](http://localhost:8000) (список предметов)
-- pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в .env)
+- pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в `.env`)
 
 ### 4. Миграции базы данных и collectstatic
 Миграции и collectstatic выполняются автоматически с помощью [`backend/entrypoint_web.sh`](backend/entrypoint_web.sh)
@@ -178,4 +178,4 @@ docker-compose down -v
 ---
 
 ## API интеграция
-Приложение интегрируется с игровым проектом STALCRAFT через API. Данные о продажах синхронизируются ежедневно с помощью цикличной задачи Celery. Для настройки API используйте переменные `STALCRAFT_CLIENT_ID`, `STALCRAFT_CLIENT_SECRET` в .env. Без них от функции в Celery `start_get_history` вы получите ошибку - `{'title': 'Unauthorized', 'status': 401, 'details': {}}`
+Приложение интегрируется с игровым проектом STALCRAFT через API. Данные о продажах синхронизируются ежедневно с помощью цикличной задачи Celery. Для настройки API используйте переменные `STALCRAFT_CLIENT_ID`, `STALCRAFT_CLIENT_SECRET` в `.env`. Без них от функции в Celery `start_get_history` вы получите ошибку - `{'title': 'Unauthorized', 'status': 401, 'details': {}}`
