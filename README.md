@@ -59,7 +59,7 @@ cd STALCRAFT-Auction-Docker
 ```
 
 ### 2. Настройка переменных окружения
-Создайте файл .env в корневой папке (рядом с `docker-compose.yml`) и настройте его под ваши нужды:
+Создайте файл `.env` в корневой папке (рядом с `docker-compose.yml`) и настройте его под ваши нужды:
 ```
 # Django
 SECRET_KEY=django-insecure-key
@@ -106,6 +106,12 @@ docker-compose up
 Если нужно запустить на фоне:
 ```bash
 docker-compose build --no-cache && docker-compose up -d
+```
+
+или
+```bash
+docker-compose build --no-cache
+docker-compose up -d
 ```
 
 После успешного запуска:
