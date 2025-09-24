@@ -98,12 +98,6 @@ docker-compose build
 docker-compose up
 ```
 
-Если нужно запустить на фоне:
-```bash
-docker-compose build
-docker-compose up -d
-```
-
 После успешного запуска:
 - Приложение будет доступно по адресу: [localhost:8000](http://localhost:8000) (список предметов)
 - pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в `.env`)
