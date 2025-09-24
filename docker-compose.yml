@@ -1,8 +1,8 @@
 services:
   web:
     build: ./backend
-    volumes:
-      - ./backend/:/usr/src/app/
+    # volumes:
+    #   - ./backend/:/usr/src/app/
     ports:
       - 8000:8000
     env_file:
@@ -46,8 +46,8 @@ services:
 
   celery_worker:
     build: ./backend
-    volumes:
-      - ./backend/:/usr/src/app/
+    # volumes:
+    #   - ./backend/:/usr/src/app/
     env_file:
       - .env
     depends_on:
@@ -59,8 +59,8 @@ services:
 
   celery_beat:
     build: ./backend
-    volumes:
-      - ./backend/:/usr/src/app/
+    # volumes:
+    #   - ./backend/:/usr/src/app/
     env_file:
       - .env
     depends_on:
