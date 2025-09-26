@@ -32,7 +32,6 @@ def item_list_view(request):
     page_obj = paginator.get_page(page)
     
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        from django.urls import reverse
         data = {
             'items': [{
                 'id': item.id,
