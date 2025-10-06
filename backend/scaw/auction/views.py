@@ -1,6 +1,5 @@
 import datetime
-from django.db.models import Q
-from django.db import connection
+from django.db import connection, models
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib import messages
@@ -16,6 +15,12 @@ from .constants import RANK_COLORS
 
 
 def item_list_view(request):
+    """
+    Просмотр списка предметов с поиском и пагинацией.
+    Поддерживает параметр search для поиска по name, category, item_id.
+    Поддерживает параметр page для пагинации (50 предметов на страницу).
+    Если запрос AJAX - возвращает JSON, иначе рендерит HTML-шаблон.
+    """
     page = request.GET.get('page', 1)
     search = request.GET.get('search', '')
     
@@ -23,9 +28,9 @@ def item_list_view(request):
     
     if search:
         items = items.filter(
-            Q(name__icontains=search) |
-            Q(category__icontains=search) |
-            Q(item_id__icontains=search)
+            models.Q(name__icontains=search) |
+            models.Q(category__icontains=search) |
+            models.Q(item_id__icontains=search)
         ).distinct()
     
     paginator = Paginator(items, 50)
@@ -45,13 +50,15 @@ def item_list_view(request):
         }
         return JsonResponse(data)
     
-    return render(request, 'auction/items_list.html', {
-        'items': page_obj,
-        'search_query': search
-    })
+    return render(request, 'auction/items_list.html')
 
 
 def item_detail_view(request, item_id):
+    """
+    Просмотр деталей предмета и его истории продаж.
+    Поддерживает параметр limit для ограничения количества записей в истории.
+    Если запрос AJAX - возвращает JSON, иначе рендерит HTML-шаблон.
+    """
     DEFAULT_LIMIT = 100  # Значение по умолчанию для limit
     MAX_LIMIT = 50000  # Максимально допустимое значение для limit
     
@@ -186,42 +193,41 @@ def upload_lang_page(request):
     return render(request, "auction/upload_lang.html")
 
 
-# class SaleHistoryCreateView(CreateView):
-#     model = SaleHistory
-#     form_class = SaleHistoryCreateForm
-#     template_name = 'auction/salehistory_create.html'
+class SaleHistoryCreateView(CreateView):
+    """
+    Представление для создания записи о продаже.
+    """
+    model = SaleHistory
+    form_class = SaleHistoryCreateForm
+    template_name = 'auction/salehistory_create.html'
 
-#     def dispatch(self, request, *args, **kwargs):
-#         item_id = self.kwargs['item_id']
-#         if item_id != 'sezonnyi_propusk':
-#             messages.error(request, "Создание записей разрешено только для 'sezonnyi_propusk'")
-#             return redirect('item-detail', item_id=item_id)
-#         return super().dispatch(request, *args, **kwargs)
+    def dispatch(self, request, *args, **kwargs):
+        item_id = self.kwargs['item_id']
+        if item_id != 'sezonnyi_propusk':
+            messages.error(request, "Создание записей разрешено только для 'sezonnyi_propusk'")
+            return redirect('item-detail', item_id=item_id)
+        return super().dispatch(request, *args, **kwargs)
 
-#     def get_initial(self):
-#         """Автоматически определяем item из URL"""
-#         initial = super().get_initial()
-#         item_id = self.kwargs['item_id']
-#         initial['item'] = get_object_or_404(Item, item_id=item_id)
-#         return initial
+    def get_initial(self):
+        """Автоматически определяем item из URL"""
+        initial = super().get_initial()
+        item_id = self.kwargs['item_id']
+        initial['item'] = get_object_or_404(Item, item_id=item_id)
+        return initial
 
-#     def form_valid(self, form):
-#         # Устанавливает item из URL
-#         item_id = self.kwargs['item_id']
-#         form.instance.item = get_object_or_404(Item, item_id=item_id)
+    def form_valid(self, form):
+        # Устанавливает item из URL
+        item_id = self.kwargs['item_id']
+        form.instance.item = get_object_or_404(Item, item_id=item_id)
         
-#         # Устанавливает автоматические поля
-#         form.instance.time = timezone.now().replace(microsecond=0)
-#         form.instance.extra_data = {}
+        # Устанавливает автоматические поля
+        form.instance.time = timezone.now().replace(microsecond=0)
+        form.instance.extra_data = {}
         
-#         try:
-#             response = super().form_valid(form)
-#             messages.success(self.request, 'Запись о продаже успешно создана!')
-#             return response
-#         except Exception as e:
-#             messages.error(self.request, f'Ошибка при создании записи: {str(e)}')
-#             return self.form_invalid(form)
-
-
-#     def get_success_url(self):
-#         return reverse('item-detail', kwargs={'item_id': self.object.item.item_id})
+        try:
+            response = super().form_valid(form)
+            messages.success(self.request, 'Запись о продаже успешно создана!')
+            return response
+        except Exception as e:
+            messages.error(self.request, f'Ошибка при создании записи: {str(e)}')
+            return self.form_invalid(form)

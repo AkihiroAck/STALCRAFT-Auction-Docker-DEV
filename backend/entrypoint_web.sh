@@ -12,6 +12,19 @@ python manage.py migrate
 #     PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USERNAME -d $POSTGRES_DATABASE_NAME -f ../auction_salehistory.sql
 # fi
 
+# Создать суперпользователя, если он не существует
+python manage.py shell <<'PY'
+import os
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+username = os.environ.get('DJANGO_SUPERUSER_USERNAME')
+password = os.environ.get('DJANGO_SUPERUSER_PASSWORD')
+
+if not User.objects.filter(username=username).exists():
+    User.objects.create_superuser(username=username, password=password)
+PY
+
 # python manage.py collectstatic --noinput
 # python manage.py collectstatic --noinput --clear
 python manage.py runserver 0.0.0.0:8000

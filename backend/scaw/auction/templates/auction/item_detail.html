@@ -41,10 +41,12 @@
             </a>
         </div>
         
-        {% if item.item_id == 'sezonnyi_propusk' %}
-            <a href="{% url 'salehistory-create' item_id=item.item_id %}" class="btn btn-warning">
-                + Добавить запись
-            </a>
+        {% if user.is_authenticated %}
+            {% if item.item_id == 'sezonnyi_propusk' %}
+                <a href="{% url 'salehistory-create' item_id=item.item_id %}" class="btn btn-warning">
+                    + Добавить запись
+                </a>
+            {% endif %}
         {% endif %}
     </div>
 
