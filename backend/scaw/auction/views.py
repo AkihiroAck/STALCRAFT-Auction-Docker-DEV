@@ -193,7 +193,7 @@ def upload_lang_page(request):
     return render(request, "auction/upload_lang.html")
 
 
-class SaleHistoryCreateView(CreateView):
+class SaleHistoryCreateView(CreateView, LoginRequiredMixin):
     """
     Представление для создания записи о продаже.
     """

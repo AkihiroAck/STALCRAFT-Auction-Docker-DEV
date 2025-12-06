@@ -6,5 +6,5 @@ from auction.tasks import start_get_history, sync_github_items_daily
 @worker_ready.connect
 def start_task_on_worker_ready(sender, **kwargs):
     start_get_history.apply_async()
-    sync_github_items_daily.apply_async()
+    # sync_github_items_daily.apply_async()
     

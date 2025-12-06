@@ -1,5 +1,5 @@
 services:
-  web:
+  backend:
     build: ./backend
     ports:
       - 8000:8000
@@ -10,7 +10,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    entrypoint: /usr/src/app/entrypoint_web.sh
+    entrypoint: /usr/src/app/entrypoint.sh
 
   db:
     image: postgres:17
@@ -43,34 +43,6 @@ services:
     restart: always
     ports:
       - 6379:6379
-
-  celery_worker:
-    build: ./backend
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      web:
-        condition: service_started
-    entrypoint: /usr/src/app/entrypoint_celery.sh
-    command: celery -A scaw worker -l INFO
-
-  celery_beat:
-    build: ./backend
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      web:
-        condition: service_started
-    entrypoint: /usr/src/app/entrypoint_celery.sh
-    command: celery -A scaw beat -l INFO
 
 volumes:
   postgres_data:
