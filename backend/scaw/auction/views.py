@@ -94,8 +94,8 @@ def item_detail_view(request, item_id):
 def process_lang_file(request):
     """
     Обработка загруженного ru.lang файла:
-    - берём все name_key из файла
-    - ищем Item по этим ключам
+    - берём все названия из файла
+    - ищем Item по этим названиям
     - считаем среднюю цену за последние N месяцев (через SQL)
     - если продаж нет, используем последнюю доступную цену до указанного периода
     - возвращаем новый файл с добавленными строками
@@ -113,13 +113,13 @@ def process_lang_file(request):
     output_lines = lines.copy()
     output_lines.append("")  # пустая строка-разделитель
 
-    # все ключи вида item.wpn.xxx.name
-    keys = [line.split("=", 1)[0] for line in lines if "=" in line]
+    # все названия предметов из файла
+    names = [line.split("=", 1)[1] for line in lines if "=" in line]
 
     # загрузка Items одним запросом
-    items = Item.objects.filter(name_key__in=keys).values("id", "name_key")
-    items_map = {i["id"]: i["name_key"] for i in items}
-    if not items_map:
+    items = Item.objects.filter(name__in=names).values("id", "name")
+    name_to_id = {i["name"]: i["id"] for i in items}
+    if not name_to_id:
         return HttpResponse("В файле нет предметов из базы", status=400)
 
     # --- основной запрос: средняя цена за N месяцев ---
@@ -148,13 +148,13 @@ def process_lang_file(request):
     """
 
     with connection.cursor() as cursor:
-        cursor.execute(query_avg, [list(items_map.keys()), date_from])
+        cursor.execute(query_avg, [list(name_to_id.values()), date_from])
         rows = cursor.fetchall()
 
     prices_map = {item_id: avg for item_id, avg in rows}
 
     # --- fallback: последняя продажа до периода ---
-    missing_ids = [i for i in items_map.keys() if i not in prices_map]
+    missing_ids = [i for i in name_to_id.values() if i not in prices_map]
     if missing_ids:
         query_last = """
             SELECT DISTINCT ON (sh.item_id) sh.item_id, sh.price
@@ -176,7 +176,7 @@ def process_lang_file(request):
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        item_id = next((id_ for id_, k in items_map.items() if k == key), None)
+        item_id = name_to_id.get(value)
         if not item_id:
             continue
         avg_price = prices_map.get(item_id)

@@ -2,9 +2,11 @@ from django.db import models
 
 
 class Item(models.Model):
+    """
+    Модель для хранения информации о предметах.
+    """
     item_id = models.CharField(max_length=100, unique=True)  # Уникальный ID предмета
     name = models.CharField(max_length=255)  # Название
-    name_key = models.CharField(max_length=255)  # Переменное
     category = models.CharField(max_length=255)  # Категория
     color = models.CharField(max_length=255)  # Цвет
     
@@ -13,6 +15,11 @@ class Item(models.Model):
 
 
 class SaleHistory(models.Model):
+    """
+    Модель для хранения истории продаж предметов.
+    Индексируется по item, time и price для оптимизации запросов.
+    Уникальное ограничение на комбинацию item, time, price и extra_data для предотвращения дубликатов.
+    """
     item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name='sales')  # Связь с предметом
     time = models.DateTimeField()  # Время продажи
     price = models.DecimalField(max_digits=30, decimal_places=2)  # Цена за единицу

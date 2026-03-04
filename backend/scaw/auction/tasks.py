@@ -1,4 +1,7 @@
+from asgiref.sync import sync_to_async
 import time
+import asyncio
+import aiohttp
 import requests
 import os
 import json
@@ -11,7 +14,6 @@ from datetime import timedelta
 from django.utils import timezone
 from django.db import transaction
 from auction.logger import log
-
 
 
 load_dotenv()
@@ -27,148 +29,140 @@ SC_HEADERS = {
 }
 
 
-def get_history(item, additional: str = 'false', limit: str = '20', offset: str = '0', region: str = 'RU') -> dict:
+async def get_history(item: Item, session: aiohttp.ClientSession, additional: str = 'false', limit: str = '20', offset: str = '0', region: str = 'RU', total_items: int = None, current_count: int = None) -> dict:
     """
-    Получает историю аукционных цен по указанному предмету для заданного региона.
+    Асинхронно получает историю аукционных цен для заданного предмета.
 
-    Формирует запрос к API Stalcraft, подставляя в URL параметры пути: регион и идентификатор предмета.
-    Остальные параметры передаются как query-параметры.
-
-    пример удачного ответа с limit = 1:
-    {'total': 5861, 'prices': [{'amount': 1, 'price': 1500000, 'time': '2025-06-14T11:30:12Z', 'additional': {}}}
-
-    
-    :param item:
-        Item - Объект предмета из БД.
-    :param additional: str, по умолчанию "false"
-        Флаг для включения дополнительной информации о лотах. Принимает строковые значения "true" или "false".
-    :param limit: str, по умолчанию "20"
-        Количество возвращаемых цен. Минимальное значение 0, максимальное 200.
-    :param offset: str, по умолчанию "0"
-        Количество записей, которые нужно пропустить в начале списка.
-    :param region: str, по умолчанию "RU"
-        Регион, для которого нужно получить историю. Пример: "RU", "EU", "NA".
-    :return: dict
-        Ответ API, преобразованный из JSON-формата в словарь Python.
+    Arguments:
+        item (Item): Объект предмета для получения истории.
+        session (aiohttp.ClientSession): Сессия для выполнения HTTP-запросов.
+        additional (str): Флаг для получения дополнительных данных. "true" или "false".
+        limit (str): Максимальное количество записей для получения. Максимум 200.
+        offset (str): Смещение для пагинации.
+        region (str): Регион сервера. Пример: "RU", "EU", "NA". По умолчанию "RU".
+        total_items (int): Общее количество предметов для логирования прогресса.
+        current_count (int): Текущий номер предмета для логирования прогресса.
+    Returns:
+        dict: JSON-ответ с историей аукционных цен.
     """
-    
-    while True:  # Цикл для повторной попытки в случае ошибки
+    url = f"https://eapi.stalcraft.net/{region}/auction/{item.item_id}/history"
+    params = {
+        "additional": str(additional).lower(),
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+
+    prefix = f"[{current_count}/{total_items}] " if current_count and total_items else ""  # Префикс для логов прогресса
+
+    while True:  # Бесконечный цикл для повторных попыток при ошибках
         try:
-            url = f"https://eapi.stalcraft.net/{region}/auction/{item.item_id}/history"
-            params = {
-                "additional": str(additional).lower(),
-                "limit": str(limit),
-                "offset": str(offset),
-            }
-
-            response = requests.get(url, headers=SC_HEADERS, params=params, timeout=21)
-            response_json = response.json()
-
-            if response.status_code != 200:  # Если не успешный статус ответа
-                log(f'ERROR: (response.status_code != 200) {item.name} [{item.item_id}]: {response_json}', save=True)
-                time.sleep(5)
-                continue  # Повторить запрос
-
-            return response_json
-        except requests.exceptions.RequestException as e:
-            log(f'ERROR: (requests) {item.name} [{item.item_id}]: {str(e)}', save=True)
-            time.sleep(20)
+            async with session.get(url, headers=SC_HEADERS, params=params, timeout=21) as response:
+                response_json = await response.json()
+                if response.status != 200:
+                    log(f'ERROR: {prefix}{item.name} [{item.item_id}]: Ошибка {response.status} при получении истории. Ответ: {response_json}', save=True)
+                    await asyncio.sleep(10)
+                    continue
+                return response_json
         except Exception as e:
-            log(f'ERROR: {item.name} [{item.item_id}]: {str(e)}', save=True)
-            time.sleep(20)
+            log(f'ERROR: {prefix}{item.name} [{item.item_id}]: Исключение при получении истории: {str(e)}', save=True)
+            await asyncio.sleep(20)
 
 
 @shared_task
 def start_get_history():
     """
-    Задача для получения истории продаж предметов из аукциона.
+    Запускает задачу получения истории аукциона для всех предметов.
+    Обрабатывает предметы пакетами с параллельными запросами и сохраняет полученные данные.
+    После завершения перезапускает саму себя через 1 секунду.
+
+    Лимит на ~200 запросов в минуту.
+
+    1. Определяет параметры пакетной обработки и параллельных запросов.
+    2. Получает общее количество предметов и итерируется по ним пакетами.
+    3. Для каждого пакета создает асинхронные задачи для получения истории.
+    4. Сохраняет полученные данные в базу данных.
+    5. Логирует время выполнения задачи.
+    6. Перезапускает задачу через 1 секунду после завершения.
+    7. Возвращает True по успешному завершению.
     """
-    
+    log("START: Задача получения истории аукциона запущена.", save=True)
+
     time_start = time.time()
-
-    batch_size=1000
     
-    total_items = Item.objects.count()  # Получаем общее количество предметов
+    parallel_limit = 100  # Количество одновременных запросов
+    pause_between_batches = 25  # Пауза между батчами в секундах
 
-    count = 0
-    
-    # Обрабатываем пакетами
-    for offset in range(0, total_items, batch_size):
+    items = list(Item.objects.order_by('id'))  # Список всех предметов
+    total_items = len(items)  # Общее количество предметов
+    count = 0  # Счетчик обработанных предметов
+
+    async def main():  # Асинхронная функция для обработки пакетов предметов
+        nonlocal count  # Используем внешний счетчик
         
-        # Получаем текущий пакет предметов
-        items = Item.objects.order_by('id')[offset:offset + batch_size]
-        
-        for item in items:
-            count += 1
-            while True:
-                try:
-                    lots = get_history(item, additional='true', limit='200')
-                    
-                    if 'total' in lots and lots.get('total') != 0:
-                        save_sale_history(item, lots.get('prices'), total_items, count)
-                    
-                    # time.sleep(0.8)  # Задержка между запросами к API (по умолчанию 0.8)
+        async with aiohttp.ClientSession() as session:  # Создаем сессию для HTTP-запросов
+            for offset in range(0, total_items, parallel_limit):  # Итерируем по предметам пакетами
+                sub_batch = items[offset:offset + parallel_limit]  # Текущий пакет предметов
 
-                    break
-                except Exception as e:
-                    log(f"ERROR: {item.name} [{item.item_id}]: {str(e)}", save=True)
-                    time.sleep(20)
-    
+                # Создаем задачи для получения истории
+                tasks = [get_history(item, session, additional='true', limit='200', current_count=count + idx + 1, total_items=total_items) for idx, item in enumerate(sub_batch)]
+
+                results = await asyncio.gather(*tasks)  # Выполняем задачи параллельно
+
+                save_tasks = []  # Список задач для сохранения истории
+                for idx, lots in enumerate(results):  # Обрабатываем результаты
+                    item = sub_batch[idx]  # Соответствующий предмет
+                    if 'total' in lots and lots.get('total') != 0:  # Проверяем наличие данных
+                        # Создаем задачу для сохранения истории продаж
+                        save_tasks.append(save_sale_history(item, lots.get('prices'), total_items, count + idx + 1))
+                if save_tasks:  # Если есть задачи для сохранения, выполняем их параллельно
+                    await asyncio.gather(*save_tasks)
+
+                count += len(sub_batch)  # Обновляем счетчик обработанных предметов
+                await asyncio.sleep(pause_between_batches)  # Пауза между пакетами
+
+    asyncio.run(main())  # Запускаем асинхронную функцию
+
     # Перезапускаем всю задачу через 1 секунд
     start_get_history.apply_async(countdown=1)
-    
-    return f"FINISH: Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+
+    log(f"FINISH: Задача получения истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n", save=True)
+    return True
 
 
-def save_sale_history(item, lots, total_items, current_count):
+async def save_sale_history(item: Item, lots: list, total_items: int, current_count: int) -> None:
     """
-    Сохраняет данные о продажах в базу данных.
-    Проверяет уникальность по time, price И extra_data.
-    
-    :param item: Item - Объект предмета
-    :param lots: list - Список лотов
-    :param total_items: int - Общее количество предметов
-    :param current_count: int - Номер данного предмета
+    Сохраняет историю продаж для заданного предмета.
+
+    Arguments:
+        item (Item): Объект предмета.
+        lots (list): Список словарей с данными о продажах.
+        total_items (int): Общее количество предметов для логирования прогресса.
+        current_count (int): Текущий номер предмета для логирования прогресса.
     """
-    
     while True:
         try:
-            sale_records_to_create = []  # Список для хранения записей, которые нужно создать
-            seen_in_current_batch = set()  # Для отслеживания дубликатов внутри текущего batches
-            
-            # Определяем временной диапазон данных от API
+            sale_records_to_create = []
+            seen_in_current_batch = set()
             api_times = [parse_datetime(lot["time"]) for lot in lots]
             min_api_time = min(api_times)
             max_api_time = max(api_times)
-            
-            # Загружаем существующие записи из БД только для этого диапазона
-            existing_records = SaleHistory.objects.filter(
+            existing_records = await sync_to_async(list)(SaleHistory.objects.filter(
                 item=item,
                 time__gte=min_api_time,
                 time__lte=max_api_time
-            ).values_list('time', 'price', 'extra_data')
-                        
-            # Создаем множество для проверки
+            ).values_list('time', 'price', 'extra_data'))
             existing_set = {
                 (time, float(price), json.dumps(extra_data, sort_keys=True))
                 for time, price, extra_data in existing_records
             }
-
-            # Фильтруем лоты: оставляем только новые
             for lot in lots:
                 sale_time = parse_datetime(lot["time"])
                 price_per_unit = round(lot["price"] / lot["amount"], 2)
                 extra_data = lot.get("additional", {})
-                
-                # Ключ для проверки
                 record_key = (sale_time, price_per_unit, json.dumps(extra_data, sort_keys=True))
-                
-                # Пропускаем дубликаты
                 if record_key in seen_in_current_batch or record_key in existing_set:
                     continue
-                
                 seen_in_current_batch.add(record_key)
-                
                 sale_records_to_create.append(
                     SaleHistory(
                         item=item,
@@ -177,40 +171,86 @@ def save_sale_history(item, lots, total_items, current_count):
                         extra_data=extra_data
                     )
                 )
-    
-            # Если есть записи для сохранения, делаем bulk_create
             if sale_records_to_create:
-                with transaction.atomic():
-                    created_count = len(SaleHistory.objects.bulk_create(
-                        sale_records_to_create,
-                        # ignore_conflicts=True  # На случай, если дубликаты появились параллельно, сохранить все кроме дубликатов без вызова ошибки
-                    ))
-                    log(f'INFO: [{current_count}/{total_items}] СОХРАНЕНО {created_count} записей для {item.name} [{item.item_id}]', save=True)
-                
-            break  # Выходим из цикла, если успешно обработали лот
-
+                def bulk_create_records():
+                    with transaction.atomic():
+                        created_count = len(SaleHistory.objects.bulk_create(sale_records_to_create))
+                        log(f'INFO: [{current_count}/{total_items}] СОХРАНЕНО {created_count} записей для {item.name} [{item.item_id}]', save=True)
+                await sync_to_async(bulk_create_records)()
+            break
         except Exception as e:
             log(f'ERROR: [{current_count}/{total_items}] {item.name} [{item.item_id}]: {str(e)}', save=True)
-            time.sleep(20)
+            await asyncio.sleep(20)
 
 
 @shared_task
 def delete_old_sales():
-    """Удаляет старые записи о продажах, старше 2 лет."""
+    """
+    Удаляет старые записи о продажах из истории аукциона.
+    Оставляет минимум save_new_count новых записей и удаляет только если старых записей больше save_old_count.
 
-    time_start = time.time()
-    older_limit = timezone.now() - timedelta(days=365 * 2)
+    1. Определяет дату-ограничение для удаления (старше delete_days).
+    2. Проходит по каждому предмету и считает количество старых и новых записей.
+    3. Если старых записей больше save_old_count и новых записей больше save_new_count,
+       удаляет все старые записи, оставляя минимум save_new_count новых.
+    4. Логирует количество удаленных записей.
+    """
+    log("START: Задача удаления старых данных по истории аукциона запущена.", save=True)
+
+    delete_days = 30 * 1  # Удалять записи старше таких дней
+    save_new_count = 1000  # Оставлять минимум таких записей на предмет
+    save_old_count = 500  # Удалять только если старых записей больше этого числа
+
+    time_start = time.time()  # Засекаем время начала задачи
+    older_limit = timezone.now() - timedelta(days=delete_days)  # Дата-ограничение для удаления
+
+    total_deleted = 0  # Счетчик удаленных записей
     
+    # Используем транзакцию для целостности данных
     with transaction.atomic():
-        old_sales = SaleHistory.objects.filter(time__lt=older_limit)
-        deleted_count, _ = old_sales.delete()
-        log(f"INFO: Удалено {deleted_count} старых записей о продажах.", save=True)
-        return f"FINISH: Задача удаления старых данных по истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+        # Получаем все id предметов, у которых есть продажи
+        item_ids = SaleHistory.objects.values_list('item', flat=True).distinct()
+
+        # Проходим по каждому предмету
+        for item_id in item_ids:
+            # Получаем QuerySet для данного предмета
+            qs = SaleHistory.objects.filter(item_id=item_id)
+
+            # Считаем старые и новые записи
+            old_count = qs.filter(time__lt=older_limit).count()  # Старые записи
+            new_count = qs.filter(time__gte=older_limit).count()  # Новые записи
+
+            # Удаляем старые записи, если условия выполнены
+            if old_count >= save_old_count and new_count >= save_new_count:
+                old_sales = qs.filter(time__lt=older_limit)  # QuerySet старых записей
+                deleted_count, _ = old_sales.delete()  # Удаляем старые записи
+                total_deleted += deleted_count  # Обновляем общий счетчик
+
+                # Логируем результат удаления для данного предмета
+                if deleted_count > 0:
+                    item_obj = Item.objects.filter(id=item_id).first()  # Получаем объект предмета для логирования
+                    log(f"INFO: Удалено {deleted_count} старых записей о продажах для предмета: {item_obj.name if item_obj else item_id}", save=True)
+
+        log(f"INFO: Всего удалено {total_deleted} старых записей о продажах.", save=True)
+
+    log(f"FINISH: Задача удаления старых данных по истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n", save=True)
+    return True
 
 
 @shared_task
 def sync_github_items_daily():
-    """Ежедневная синхронизация предметов из GitHub с массовой обработкой"""
+    """
+    Синхронизирует предметы из GitHub репозитория STALCRAFT Database.
+    Загружает список предметов, декодирует их и массово создает или обновляет записи в базе данных.
+
+    1. Загружает данные из GitHub репозитория.
+    2. Декодирует base64 контент и парсит JSON.
+    3. Подготавливает данные для массовой обработки.
+    4. Вызывает функцию для массового создания или обновления предметов.
+    5. Логирует время выполнения задачи.
+    6. Возвращает True по успешному завершению.
+    """
+    log("START: Задача синхронизации предметов из GitHub запущена.", save=True)
 
     time_start = time.time()
 
@@ -236,14 +276,13 @@ def sync_github_items_daily():
 
                 item_id = item_path.split('/')[-1].replace('.json', '')
                 name = item_info['name']['lines']['ru']
-                name_key = item_info['name']['key']
+                # name_key = item_info['name']['key']  # Удалено
                 category = '/'.join(item_path.split('/')[2:-1])
                 color = item_info.get('color', 'DEFAULT')
 
                 processed_data.append({
                     'item_id': item_id,
                     'name': name,
-                    'name_key': name_key,
                     'category': category,
                     'color': color,
 
@@ -256,16 +295,19 @@ def sync_github_items_daily():
         # Массовая обработка данных
         create_or_update_items(processed_data)
 
-        return f"FINISH: Задача выполнена: {str(timedelta(seconds=time.time() - time_start))}\n"
+        log(f"FINISH: Задача синхронизации предметов выполнена: {str(timedelta(seconds=time.time() - time_start))}\n", save=True)
+        return True
 
     except Exception as e:
         log(f"ERROR: Ошибка синхронизации: {e}", save=True)
         return False
 
 
-def create_or_update_items(items_data):
+def create_or_update_items(items_data: list[dict]) -> None:
     """
-    Массово создает/обновляет объекты Item
+    Массово создает или обновляет предметы в базе данных.
+    Arguments:
+        items_data (list[dict]): Список словарей с данными о предметах.
     """
     with transaction.atomic():
         # Создаем словарь для быстрого доступа к данным по item_id
@@ -289,7 +331,6 @@ def create_or_update_items(items_data):
                 to_create.append(Item(
                     item_id=item_id,
                     name=data['name'],
-                    name_key=data['name_key'],
                     category=data['category'],
                     color=data['color']
                 ))
@@ -299,14 +340,12 @@ def create_or_update_items(items_data):
                 existing_item = existing_items[item_id]
                 needs_update = (
                         existing_item.name != data['name'] or
-                        existing_item.name_key != data['name_key'] or
                         existing_item.category != data['category'] or
                         existing_item.color != data['color']
                 )
 
                 if needs_update:
                     existing_item.name = data['name']
-                    existing_item.name_key = data['name_key']
                     existing_item.category = data['category']
                     existing_item.color = data['color']
                     to_update.append(existing_item)
@@ -316,6 +355,6 @@ def create_or_update_items(items_data):
         if to_create:
             Item.objects.bulk_create(to_create)
         if to_update:
-            Item.objects.bulk_update(to_update, ['name', 'name_key', 'category', 'color'])
+            Item.objects.bulk_update(to_update, ['name', 'category', 'color'])
 
         log(f"INFO: СОЗДАНО: {len(to_create)}, ОБНОВЛЕНО: {len(to_update)}", save=True)
