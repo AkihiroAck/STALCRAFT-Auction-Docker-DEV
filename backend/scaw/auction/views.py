@@ -1,17 +1,421 @@
 import datetime
+import json
+import os
 from django.db import connection, models
+from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib import messages
+from django.contrib.auth import authenticate, login, logout
 from django.http import JsonResponse, HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET, require_POST
 from django.core.paginator import Paginator
 from django.views.generic import CreateView
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.mixins import LoginRequiredMixin
 
+from scaw.celery import app as celery_app
 from .models import SaleHistory, Item
 from .forms import SaleHistoryCreateForm
 from .constants import RANK_COLORS
+
+
+DEFAULT_LIMIT = 100
+MAX_LIMIT = 50000
+ALLOWED_MANUAL_TASKS = {
+    'auction.tasks.sync_github_items_daily',
+    'auction.tasks.delete_old_sales',
+    'auction.tasks.start_get_history',
+}
+
+
+def _serialize_item(item):
+    return {
+        'id': item.id,
+        'item_id': item.item_id,
+        'name': item.name,
+        'category': item.category,
+        'color': RANK_COLORS.get(item.color, RANK_COLORS['DEFAULT']),
+        'rank': item.color,
+        'icon_url': f"https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{item.category}/{item.item_id}.png",
+    }
+
+
+def _build_category_tree(items_data):
+    tree = {}
+
+    for item in items_data:
+        category_parts = item['category'].split('/')
+        node = tree
+
+        for part in category_parts:
+            node.setdefault(part, {'_children': {}, '_count': 0})
+            node[part]['_count'] += 1
+            node = node[part]['_children']
+
+    def pack(node):
+        packed = []
+
+        for name in sorted(node.keys()):
+            data = node[name]
+            packed.append({
+                'name': name,
+                'count': data['_count'],
+                'children': pack(data['_children']),
+            })
+
+        return packed
+
+    return pack(tree)
+
+
+def _get_json_body(request):
+    try:
+        return json.loads(request.body.decode('utf-8') or '{}')
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+def _ensure_staff(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({'detail': 'Authentication required'}, status=401)
+
+    if not request.user.is_staff:
+        return JsonResponse({'detail': 'Admin access required'}, status=403)
+
+    return None
+
+
+def _tail_lines(file_path, lines=200):
+    if not os.path.exists(file_path):
+        return []
+
+    with open(file_path, 'r', encoding='utf-8', errors='replace') as fp:
+        content = fp.readlines()
+
+    return [line.rstrip('\n') for line in content[-lines:]]
+
+
+@require_GET
+def api_auth_me(request):
+    user = request.user
+
+    if not user.is_authenticated:
+        return JsonResponse(
+            {
+                'authenticated': False,
+                'is_staff': False,
+                'is_superuser': False,
+                'username': None,
+            }
+        )
+
+    return JsonResponse(
+        {
+            'authenticated': True,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser,
+            'username': user.username,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def api_auth_login(request):
+    body = _get_json_body(request)
+    username = body.get('username', '').strip()
+    password = body.get('password', '')
+
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return JsonResponse({'detail': 'Invalid username or password'}, status=400)
+
+    if not user.is_staff:
+        return JsonResponse({'detail': 'Admin access required'}, status=403)
+
+    login(request, user)
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'username': user.username,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def api_auth_logout(request):
+    logout(request)
+    return JsonResponse({'ok': True})
+
+
+@require_GET
+def api_admin_celery_overview(request):
+    denied = _ensure_staff(request)
+    if denied:
+        return denied
+
+    inspector = celery_app.control.inspect(timeout=1.0)
+
+    active = inspector.active() or {}
+    reserved = inspector.reserved() or {}
+    scheduled = inspector.scheduled() or {}
+    registered = inspector.registered() or {}
+    stats = inspector.stats() or {}
+
+    workers = sorted(set(active.keys()) | set(reserved.keys()) | set(scheduled.keys()) | set(stats.keys()))
+
+    running_tasks = []
+    for worker_name, worker_tasks in active.items():
+        for task in worker_tasks:
+            running_tasks.append(
+                {
+                    'worker': worker_name,
+                    'id': task.get('id'),
+                    'name': task.get('name'),
+                    'args': task.get('args'),
+                    'kwargs': task.get('kwargs'),
+                    'time_start': task.get('time_start'),
+                }
+            )
+
+    pending_tasks = []
+    for worker_name, worker_tasks in reserved.items():
+        for task in worker_tasks:
+            pending_tasks.append(
+                {
+                    'worker': worker_name,
+                    'id': task.get('id'),
+                    'name': task.get('name'),
+                    'args': task.get('args'),
+                    'kwargs': task.get('kwargs'),
+                    'state': 'reserved',
+                }
+            )
+
+    for worker_name, worker_tasks in scheduled.items():
+        for task in worker_tasks:
+            request_data = task.get('request', {})
+            pending_tasks.append(
+                {
+                    'worker': worker_name,
+                    'id': request_data.get('id'),
+                    'name': request_data.get('name'),
+                    'args': request_data.get('args'),
+                    'kwargs': request_data.get('kwargs'),
+                    'eta': task.get('eta'),
+                    'state': 'scheduled',
+                }
+            )
+
+    return JsonResponse(
+        {
+            'workers': workers,
+            'running_tasks': running_tasks,
+            'pending_tasks': pending_tasks,
+            'registered_tasks': registered,
+            'stats': stats,
+            'manual_tasks': sorted(ALLOWED_MANUAL_TASKS),
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def api_admin_celery_start_task(request):
+    denied = _ensure_staff(request)
+    if denied:
+        return denied
+
+    body = _get_json_body(request)
+    task_name = body.get('task_name')
+    args = body.get('args', [])
+    kwargs = body.get('kwargs', {})
+
+    if task_name not in ALLOWED_MANUAL_TASKS:
+        return JsonResponse({'detail': 'Task is not allowed for manual start'}, status=400)
+
+    if not isinstance(args, list) or not isinstance(kwargs, dict):
+        return JsonResponse({'detail': 'Invalid args or kwargs payload'}, status=400)
+
+    result = celery_app.send_task(task_name, args=args, kwargs=kwargs)
+
+    return JsonResponse({'ok': True, 'task_id': result.id, 'task_name': task_name})
+
+
+@csrf_exempt
+@require_POST
+def api_admin_celery_stop_task(request):
+    denied = _ensure_staff(request)
+    if denied:
+        return denied
+
+    body = _get_json_body(request)
+    task_id = body.get('task_id')
+    terminate = bool(body.get('terminate', True))
+    signal_name = body.get('signal', 'SIGTERM')
+
+    if not task_id:
+        return JsonResponse({'detail': 'task_id is required'}, status=400)
+
+    celery_app.control.revoke(task_id, terminate=terminate, signal=signal_name)
+
+    return JsonResponse({'ok': True, 'task_id': task_id, 'terminate': terminate})
+
+
+@require_GET
+def api_admin_celery_logs(request):
+    denied = _ensure_staff(request)
+    if denied:
+        return denied
+
+    source = request.GET.get('source', 'app')
+    try:
+        lines = int(request.GET.get('lines', 250))
+    except (TypeError, ValueError):
+        lines = 250
+
+    lines = min(max(lines, 20), 2000)
+
+    log_map = {
+        'app': os.path.join(settings.BASE_DIR, 'logs.log'),
+        'worker': os.getenv('CELERY_WORKER_LOG_FILE', '/tmp/celery_worker.log'),
+        'beat': os.getenv('CELERY_BEAT_LOG_FILE', '/tmp/celery_beat.log'),
+    }
+
+    selected_path = log_map.get(source)
+    if not selected_path:
+        return JsonResponse({'detail': 'Unknown log source'}, status=400)
+
+    content = _tail_lines(selected_path, lines=lines)
+
+    return JsonResponse(
+        {
+            'source': source,
+            'path': selected_path,
+            'lines': content,
+            'exists': os.path.exists(selected_path),
+        }
+    )
+
+
+@require_GET
+def api_items(request):
+    search = request.GET.get('search', '').strip()
+    category_prefix = request.GET.get('category', '').strip()
+    page = request.GET.get('page', 1)
+    try:
+        page_size = int(request.GET.get('page_size', 120))
+    except (TypeError, ValueError):
+        page_size = 120
+
+    page_size = min(max(page_size, 1), 500)
+
+    items = Item.objects.all().order_by('name')
+
+    if search:
+        items = items.filter(
+            models.Q(name__icontains=search)
+            | models.Q(category__icontains=search)
+            | models.Q(item_id__icontains=search)
+        ).distinct()
+
+    if category_prefix:
+        items = items.filter(category__startswith=category_prefix)
+
+    paginator = Paginator(items, page_size)
+    page_obj = paginator.get_page(page)
+
+    return JsonResponse(
+        {
+            'items': [_serialize_item(item) for item in page_obj],
+            'has_next': page_obj.has_next(),
+            'page': page_obj.number,
+            'page_size': page_size,
+            'total': paginator.count,
+        }
+    )
+
+
+@require_GET
+def api_items_all(request):
+    items = Item.objects.all().order_by('name')
+
+    return JsonResponse(
+        {
+            'items': [_serialize_item(item) for item in items],
+            'categories': _build_category_tree(items.values('category')),
+        }
+    )
+
+
+@require_GET
+def api_item_suggest(request):
+    query = request.GET.get('q', '').strip()
+    try:
+        limit = int(request.GET.get('limit', 8))
+    except (TypeError, ValueError):
+        limit = 8
+
+    limit = min(max(limit, 1), 20)
+
+    if not query:
+        return JsonResponse({'items': []})
+
+    items = (
+        Item.objects.filter(name__icontains=query)
+        .order_by('name')
+        .values('item_id', 'name', 'category')[:limit]
+    )
+
+    return JsonResponse({'items': list(items)})
+
+
+@require_GET
+def api_item_detail(request, item_id):
+    item = get_object_or_404(Item, item_id=item_id)
+
+    return JsonResponse(
+        {
+            'item': _serialize_item(item),
+            'max_limit': MAX_LIMIT,
+        }
+    )
+
+
+@require_GET
+def api_item_sales(request, item_id):
+    item = get_object_or_404(Item, item_id=item_id)
+
+    try:
+        limit = min(int(request.GET.get('limit', DEFAULT_LIMIT)), MAX_LIMIT)
+    except (TypeError, ValueError):
+        limit = DEFAULT_LIMIT
+
+    limit = max(2, limit)
+
+    sales = (
+        SaleHistory.objects.filter(item_id=item.id)
+        .order_by('-time')
+        .values('id', 'price', 'time', 'extra_data', 'item__name', 'item__color')[:limit]
+    )
+
+    return JsonResponse(
+        {
+            'sales': list(sales),
+            'colors': RANK_COLORS,
+        }
+    )
+
+
+@csrf_exempt
+def api_process_lang_file(request):
+    return process_lang_file(request)
 
 
 def item_list_view(request):
@@ -59,9 +463,6 @@ def item_detail_view(request, item_id):
     Поддерживает параметр limit для ограничения количества записей в истории.
     Если запрос AJAX - возвращает JSON, иначе рендерит HTML-шаблон.
     """
-    DEFAULT_LIMIT = 100  # Значение по умолчанию для limit
-    MAX_LIMIT = 50000  # Максимально допустимое значение для limit
-    
     item = get_object_or_404(Item, item_id=item_id)  # Получаем предмет по item_id, если не найдено, возвращаем 404
     
     # Получаем параметр limit из запроса и проверяем его корректность

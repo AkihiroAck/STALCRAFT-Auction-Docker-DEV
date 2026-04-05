@@ -26,11 +26,14 @@ if not User.objects.filter(username=username).exists():
 PY
 
 # Запускаем celery worker в фоне
-celery -A scaw worker -l INFO &
+CELERY_WORKER_LOG_FILE=${CELERY_WORKER_LOG_FILE:-/tmp/celery_worker.log}
+CELERY_BEAT_LOG_FILE=${CELERY_BEAT_LOG_FILE:-/tmp/celery_beat.log}
+
+celery -A scaw worker -l INFO --logfile="$CELERY_WORKER_LOG_FILE" &
 WORKER_PID=$! # Сохраняем PID этого процесса
 
 # Запускаем celery beat в фоне
-celery -A scaw beat -l INFO &
+celery -A scaw beat -l INFO --logfile="$CELERY_BEAT_LOG_FILE" &
 BEAT_PID=$! # Сохраняем PID этого процесса
 
 # python manage.py collectstatic --noinput

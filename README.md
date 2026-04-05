@@ -20,7 +20,9 @@
 ## Описание проекта
 
 **STALCRAFT-Auction-Docker** — это веб-приложение для управления аукционом, интегрированное с игровым проектом STALCRAFT.  
-Приложение автоматически получает данные о продажах из внешнего API и предоставляет удобный интерфейс для просмотра, поиска и управления этими данными.
+Проект разделен на два независимых слоя:
+- **Backend (Django)**: API + сбор и хранение данных.
+- **Frontend (React + Vite)**: современный интерфейс для работы с предметами и графиками.
 
 ---
 
@@ -34,11 +36,10 @@
 ---
 
 ### Доступные страницы:
-- [/auction/items/](http://localhost:8000/auction/items/) - Список всех предметов.
-
-- [/auction/items/<item_id>/](http://localhost:8000/auction/items/9mmq/) - Информация о продажах определённого предмета.
-
-- [/auction/upload-lang/](http://localhost:8000/auction/upload-lang/) - Пользователь загружает файл предметов из игры и получает обратно файл с добавленными средними ценами за выбранный период.
+- [http://localhost:5173/items](http://localhost:5173/items) - React-страница списка предметов с поиском, категориями и подкатегориями.
+- [http://localhost:5173/items/<item_id>](http://localhost:5173/items/9mmq) - React-страница графика истории продаж предмета.
+- [http://localhost:5173/upload-lang](http://localhost:5173/upload-lang) - Загрузка ru.lang и получение файла со средними ценами.
+- [http://localhost:5173/admin-panel](http://localhost:5173/admin-panel) - Админ-панель мониторинга Celery (запуск, остановка, активные задачи, live-логи).
 
 ---
 
@@ -102,8 +103,22 @@ docker-compose up
 ```
 
 После успешного запуска:
-- Приложение будет доступно по адресу: [localhost:8000](http://localhost:8000) (список предметов)
+- Frontend будет доступен по адресу: [localhost:5173](http://localhost:5173)
+- Backend API будет доступен по адресу: [localhost:8000/auction/api](http://localhost:8000/auction/api/items/)
 - pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в `.env`)
+
+Примечание для разработки фронта:
+- Изменения в файлах `frontend/src/*` применяются автоматически в Docker (hot-reload) без пересборки образа.
+- Если контейнер `frontend` запущен, достаточно просто сохранить файл — страница обновится сама.
+
+Доступ в админ-панель:
+- Выполняется через Django-пользователя с правами `is_staff`/`superuser`.
+- Учетная запись создается из переменных `DJANGO_SUPERUSER_USERNAME` и `DJANGO_SUPERUSER_PASSWORD` при старте backend.
+
+Мониторинг Celery в админ-панели:
+- Отображает workers, активные/ожидающие задачи, список доступных задач для ручного запуска.
+- Поддерживает остановку активной задачи (`revoke terminate`).
+- Логи показываются в реальном времени (polling каждые 2 секунды) для `app`, `worker`, `beat`.
 
 ### 4. Миграции базы данных и collectstatic
 Миграции и collectstatic выполняются автоматически с помощью [`backend/entrypoint_web.sh`](backend/entrypoint_web.sh)
@@ -158,6 +173,10 @@ docker-compose down -v
   - **entrypoint_celery.sh** — скрипт запуска Celery внутри контейнера.
   - **entrypoint_web.sh** — скрипт запуска веб-приложения (Django + Gunicorn).
   - **requirements.txt** — список зависимостей Python-пакетов.
+- **frontend/** — отдельный React-клиент.
+  - **src/pages/** — страницы списка предметов, графика и загрузки ru.lang.
+  - **src/components/** — переиспользуемые UI-компоненты (категории, поиск).
+  - **src/api.js** — клиент для работы с Django API.
 - **docker-compose.yml** — конфигурация для запуска всех сервисов (PostgreSQL, Redis, backend, Celery) через Docker Compose.
 - **.env** — файл с переменными окружения (секреты, ключи, настройки БД и др.).
 
