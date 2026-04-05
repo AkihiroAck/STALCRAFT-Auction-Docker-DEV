@@ -10,101 +10,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     entrypoint: /usr/src/app/entrypoint.sh
-
-  airflow-init:
-    build:
-      context: .
-      dockerfile: airflow/Dockerfile
-    env_file:
-      - .env
-    environment:
-      AIRFLOW_HOME: /opt/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DATABASE_NAME}
-      AIRFLOW__WEBSERVER__SECRET_KEY: ${SECRET_KEY}
-      DJANGO_SETTINGS_MODULE: scaw.settings
-      PYTHONPATH: /opt/app/backend/scaw
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./backend:/opt/app/backend
-      - airflow_logs:/opt/airflow/logs
-    depends_on:
-      db:
-        condition: service_healthy
-    command: >
-      bash -c "
-      airflow db migrate &&
-      airflow users create
-      --username ${AIRFLOW_ADMIN_USERNAME:-admin}
-      --password ${AIRFLOW_ADMIN_PASSWORD:-admin}
-      --firstname Airflow
-      --lastname Admin
-      --role Admin
-      --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com} || true
-      "
-
-  airflow-webserver:
-    build:
-      context: .
-      dockerfile: airflow/Dockerfile
-    restart: always
-    env_file:
-      - .env
-    environment:
-      AIRFLOW_HOME: /opt/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DATABASE_NAME}
-      AIRFLOW__WEBSERVER__SECRET_KEY: ${SECRET_KEY}
-      DJANGO_SETTINGS_MODULE: scaw.settings
-      PYTHONPATH: /opt/app/backend/scaw
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/entrypoint.sh:/entrypoint.sh:ro
-      - ./backend:/opt/app/backend
-      - airflow_logs:/opt/airflow/logs
-    depends_on:
-      db:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
-    ports:
-      - 8080:8080
-    entrypoint: /entrypoint.sh
-    command: webserver
-
-  airflow-scheduler:
-    build:
-      context: .
-      dockerfile: airflow/Dockerfile
-    restart: always
-    env_file:
-      - .env
-    environment:
-      AIRFLOW_HOME: /opt/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DATABASE_NAME}
-      AIRFLOW__WEBSERVER__SECRET_KEY: ${SECRET_KEY}
-      DJANGO_SETTINGS_MODULE: scaw.settings
-      PYTHONPATH: /opt/app/backend/scaw
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/entrypoint.sh:/entrypoint.sh:ro
-      - ./backend:/opt/app/backend
-      - airflow_logs:/opt/airflow/logs
-    depends_on:
-      db:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
-    entrypoint: /entrypoint.sh
-    command: scheduler
 
   db:
     image: postgres:17
@@ -132,6 +40,11 @@ services:
     ports:
       - 5050:80
 
+  redis:
+    image: redis:7
+    restart: always
+    ports:
+      - 6379:6379
+
 volumes:
   postgres_data:
-  airflow_logs:

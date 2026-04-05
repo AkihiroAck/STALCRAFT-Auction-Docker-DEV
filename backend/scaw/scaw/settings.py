@@ -124,6 +124,43 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# ------------------------------------------ НАСТРОЙКИ CELERY ------------------------------------------
+# ------------------------------------------------------------------------------------------------------
+
+REDIS_HOST = os.getenv('REDIS_HOST')
+REDIS_PORT = os.getenv('REDIS_PORT')
+REDIS_DB = os.getenv('REDIS_DB')
+
+# Настройка брокера и бэкенда для Celery
+CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"  # Брокер будет пользоваться локальным Redis
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL  # Хранить результаты в том же Redis
+
+# CELERY_BROKER_URL = f'redis://{REDIS_USERNAME}:{REDIS_PASSWORD}@{REDIS_PUBLIC_ENDPOINT_URL}:{REDIS_PUBLIC_ENDPOINT_PORT}'  # БРОКЕР будет пользоваться REDIS CLOUD
+# CELERY_BROKER_URL = 'sqla+sqlite:///celery_broker.sqlite'  # БРОКЕР будет пользоваться локальным sqlite
+# CELERY_IGNORE_RESULT = True  # Игнорируем результаты задач, чтобы не сохранять их
+
+CELERY_ACCEPT_CONTENT = ['application/json']  # Допустимый формат данных
+CELERY_TASK_SERIALIZER = 'json'  # Метод сериализации задач
+CELERY_RESULT_SERIALIZER = 'json'  # Метод сериализации результатов
+
+# Повторные попытки подключения брокера при запуске Celery
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# Также обратите внимание, что Celery с версией выше 4+ не поддерживается Windows.
+# Поэтому если у вас версия Python 3.10 и выше,
+# запускайте Celery, добавив в команду флаг: --pool=solo.
+
+# Для запуска Celery нужно быть в директории project
+
+# Запустить Celery:
+# Для запуска периодических задач на Windows запустите в разных окнах терминала:
+# celery -A scaw worker -l INFO --pool=solo
+# celery -A scaw beat -l INFO
+
+# Удалить очередь
+# celery -A scaw purge
+
+
 # ---------------------------------------- INTERNATIONALIZATION ----------------------------------------
 # ------------------------------------------------------------------------------------------------------
 
