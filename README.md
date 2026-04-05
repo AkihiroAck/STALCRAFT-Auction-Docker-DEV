@@ -10,7 +10,7 @@
    2. [Настройка переменных окружения](#2-настройка-переменных-окружения)
    3. [Запуск с помощью Docker](#3-запуск-с-помощью-docker)
    4. [Миграции базы данных и collectstatic](#4-миграции-базы-данных-и-collectstatic)
-   5. [Celery](#5-celery)
+   5. [Apache Airflow](#5-apache-airflow)
 6. [Остановка проекта](#остановка-проекта)
 7. [Структура проекта](#структура-проекта)
 8. [API интеграция](#api-интеграция)
@@ -84,10 +84,10 @@ POSTGRES_PORT=5432
 PGADMIN_EMAIL=admin@admin.com
 PGADMIN_PASSWORD=1234
 
-# Redis
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_DB=0
+# Airflow
+AIRFLOW_ADMIN_USERNAME=admin
+AIRFLOW_ADMIN_PASSWORD=admin
+AIRFLOW_ADMIN_EMAIL=admin@example.com
 ```
 
 Примечание:
@@ -104,23 +104,24 @@ docker-compose up
 После успешного запуска:
 - Приложение будет доступно по адресу: [localhost:8000](http://localhost:8000) (список предметов)
 - pgAdmin: [localhost:5050](http://localhost:5050) (логин и пароль указаны в `.env`)
+- Airflow: [localhost:8080](http://localhost:8080) (логин/пароль из `AIRFLOW_ADMIN_*`)
 
 ### 4. Миграции базы данных и collectstatic
-Миграции и collectstatic выполняются автоматически с помощью [`backend/entrypoint_web.sh`](backend/entrypoint_web.sh)
+Миграции выполняются автоматически с помощью [`backend/entrypoint.sh`](backend/entrypoint.sh)
 ```bash
 python manage.py makemigrations
 python manage.py migrate
-python manage.py collectstatic --noinput
-gunicorn scaw.wsgi:application --bind 0.0.0.0:8000
+python manage.py runserver 0.0.0.0:8000
 ```
 
-### 5. Celery
-Celery запускается автоматически с помощью `command` в `docker-compose.yml`.
-Запускается после миграции. Проверка миграции происходит в [`backend/entrypoint_celery.sh`](backend/entrypoint_celery.sh) с помощью [`backend/wait_for_migrations.py`](backend/wait_for_migrations.py)
+### 5. Apache Airflow
+Планировщик и фоновые задачи запускаются через Apache Airflow (`airflow-webserver` и `airflow-scheduler`) в `docker-compose.yml`.
 
-Celery используется для фоновых задач, таких как: 
-- **Синхронизация данных (`sync_github_items_daily`)** - Проверяет наличие новых или обновленных предметов с помощью api запроса `STALCRAFT_DATABASE_LISTING`. Запускается при первом запуске проекта и каждый день 16:00 (UTC+0) и сохраняет их в базу данных.
-- **Получение историй последних продаж (`start_get_history`)** - Делает запрос на сервер игры и получает историю последних 200 продаж. Сохраняет в базу данных только новые продажи. Запускается при запуске проекта и повторяется после завершения цикла.
+Используются следующие DAG-и:
+- **`auction_sync_github_startup`** — однократная синхронизация предметов при первом запуске Airflow.
+- **`auction_sync_github_daily`** — ежедневная синхронизация предметов в 16:00 (UTC+0).
+- **`auction_history_continuous`** — непрерывное обновление истории продаж (каждую минуту, без параллельных запусков).
+- **`auction_delete_old_sales_weekly`** — удаление старых продаж по понедельникам в 03:00 (UTC+0).
 
 ---
 
@@ -155,13 +156,13 @@ docker-compose down -v
   - **auction_item.sql** — Backup с начальными данными предметов, используется для первичного наполнения базы при первом запуске.
   - **auction_salehistory.sql** — Backup историей продаж предметов, используется для первичного наполнения базы при первом запуске.
   - **Dockerfile** — инструкция сборки Docker-образа для backend.
-  - **entrypoint_celery.sh** — скрипт запуска Celery внутри контейнера.
-  - **entrypoint_web.sh** — скрипт запуска веб-приложения (Django + Gunicorn).
+  - **entrypoint.sh** — скрипт запуска веб-приложения и миграций.
   - **requirements.txt** — список зависимостей Python-пакетов.
-- **docker-compose.yml** — конфигурация для запуска всех сервисов (PostgreSQL, Redis, backend, Celery) через Docker Compose.
+- **airflow/** — Dockerfile, зависимости и DAG-и Airflow.
+- **docker-compose.yml** — конфигурация для запуска всех сервисов (PostgreSQL, backend, pgAdmin, Airflow) через Docker Compose.
 - **.env** — файл с переменными окружения (секреты, ключи, настройки БД и др.).
 
 ---
 
 ## API интеграция
-Приложение интегрируется с игровым проектом STALCRAFT через API. Данные о продажах синхронизируются ежедневно с помощью цикличной задачи Celery. Для настройки API используйте переменные `STALCRAFT_CLIENT_ID`, `STALCRAFT_CLIENT_SECRET` в `.env`. Без них от функции в Celery `start_get_history` вы получите ошибку - `{'title': 'Unauthorized', 'status': 401, 'details': {}}`
+Приложение интегрируется с игровым проектом STALCRAFT через API. Данные о продажах синхронизируются DAG-задачами Airflow. Для настройки API используйте переменные `STALCRAFT_CLIENT_ID`, `STALCRAFT_CLIENT_SECRET` в `.env`. Без них функция `start_get_history` вернет ошибку `{'title': 'Unauthorized', 'status': 401, 'details': {}}`.

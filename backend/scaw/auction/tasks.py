@@ -7,7 +7,6 @@ import os
 import json
 import base64
 from dotenv import load_dotenv
-from celery import shared_task
 from auction.models import SaleHistory, Item
 from django.utils.dateparse import parse_datetime
 from datetime import timedelta
@@ -68,13 +67,10 @@ async def get_history(item: Item, session: aiohttp.ClientSession, additional: st
             await asyncio.sleep(20)
 
 
-@shared_task
 def start_get_history():
     """
     Запускает задачу получения истории аукциона для всех предметов.
     Обрабатывает предметы пакетами с параллельными запросами и сохраняет полученные данные.
-    После завершения перезапускает саму себя через 1 секунду.
-
     Лимит на ~200 запросов в минуту.
 
     1. Определяет параметры пакетной обработки и параллельных запросов.
@@ -82,8 +78,7 @@ def start_get_history():
     3. Для каждого пакета создает асинхронные задачи для получения истории.
     4. Сохраняет полученные данные в базу данных.
     5. Логирует время выполнения задачи.
-    6. Перезапускает задачу через 1 секунду после завершения.
-    7. Возвращает True по успешному завершению.
+    6. Возвращает True по успешному завершению.
     """
     log("START: Задача получения истории аукциона запущена.", save=True)
 
@@ -121,9 +116,6 @@ def start_get_history():
                 await asyncio.sleep(pause_between_batches)  # Пауза между пакетами
 
     asyncio.run(main())  # Запускаем асинхронную функцию
-
-    # Перезапускаем всю задачу через 1 секунд
-    start_get_history.apply_async(countdown=1)
 
     log(f"FINISH: Задача получения истории аукциона выполнена: {str(timedelta(seconds=time.time() - time_start))}\n", save=True)
     return True
@@ -183,7 +175,6 @@ async def save_sale_history(item: Item, lots: list, total_items: int, current_co
             await asyncio.sleep(20)
 
 
-@shared_task
 def delete_old_sales():
     """
     Удаляет старые записи о продажах из истории аукциона.
@@ -237,7 +228,6 @@ def delete_old_sales():
     return True
 
 
-@shared_task
 def sync_github_items_daily():
     """
     Синхронизирует предметы из GitHub репозитория STALCRAFT Database.
@@ -253,14 +243,37 @@ def sync_github_items_daily():
     log("START: Задача синхронизации предметов из GitHub запущена.", save=True)
 
     time_start = time.time()
-
+    max_retries = 3
+    retry_delay = 10
+    
     try:
         url = STALCRAFT_DATABASE_LISTING
-        response = requests.get(url)
-
-        if response.status_code != 200:
-            log(f"ERROR: Ошибка запроса: {response.status_code}", save=True)
-            return False
+        
+        # Повторные попытки при неудачных запросах с логированием и задержкой между ними
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.get(url)
+                
+                if response.status_code == 200:
+                    break
+                
+                if attempt < max_retries:
+                    log(f"WARNING: Ошибка запроса {response.status_code}, попытка {attempt}/{max_retries}. Повтор через {retry_delay} секунд", save=True)
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    error_msg = f"Ошибка запроса {response.status_code} после {max_retries} попыток"
+                    log(f"ERROR: {error_msg}", save=True)
+                    raise Exception(error_msg)
+                    
+            except requests.RequestException as e:
+                if attempt < max_retries:
+                    log(f"WARNING: Ошибка подключения: {e}, попытка {attempt}/{max_retries}. Повтор через {retry_delay} секунд", save=True)
+                    time.sleep(retry_delay)
+                else:
+                    error_msg = f"Ошибка подключения после {max_retries} попыток: {e}"
+                    log(f"ERROR: {error_msg}", save=True)
+                    raise Exception(error_msg)
 
         data = response.json()
 
@@ -299,8 +312,9 @@ def sync_github_items_daily():
         return True
 
     except Exception as e:
-        log(f"ERROR: Ошибка синхронизации: {e}", save=True)
-        return False
+        error_msg = f"Ошибка синхронизации: {e}"
+        log(f"ERROR: {error_msg}", save=True)
+        raise Exception(error_msg)
 
 
 def create_or_update_items(items_data: list[dict]) -> None:
