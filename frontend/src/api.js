@@ -1,4 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/auction/api'
+const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, '')
+
+function encodeCategoryPath(category) {
+  return String(category || '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -26,6 +34,10 @@ export async function fetchAllItems() {
 export async function fetchItemSuggestions(query, limit = 8) {
   if (!query.trim()) return { items: [] }
   return request(`/items/suggest/?q=${encodeURIComponent(query)}&limit=${limit}`)
+}
+
+export function getOptimizedIconUrl(category, itemId, size = 56) {
+  return `${BACKEND_BASE}/api/icons/${encodeCategoryPath(category)}/${encodeURIComponent(itemId)}/?size=${size}`
 }
 
 export async function fetchItemDetail(itemId) {

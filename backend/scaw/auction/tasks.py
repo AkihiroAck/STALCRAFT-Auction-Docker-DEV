@@ -20,13 +20,60 @@ load_dotenv()
 
 STALCRAFT_CLIENT_ID = os.getenv('STALCRAFT_CLIENT_ID')
 STALCRAFT_CLIENT_SECRET = os.getenv('STALCRAFT_CLIENT_SECRET')
-STALCRAFT_DATABASE_LISTING = os.getenv('STALCRAFT_DATABASE_LISTING')
+DEFAULT_STALCRAFT_DATABASE_LISTING = 'https://raw.githubusercontent.com/EXBO-Studio/stalcraft-database/main/ru/listing.json'
+STALCRAFT_DATABASE_LISTING = os.getenv('STALCRAFT_DATABASE_LISTING', DEFAULT_STALCRAFT_DATABASE_LISTING)
 
 SC_HEADERS = {
     'Content-Type': 'application/json',
     'Client-Id': STALCRAFT_CLIENT_ID,
     'Client-Secret': STALCRAFT_CLIENT_SECRET,
 }
+
+GITHUB_HTTP_HEADERS = {
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'STALCRAFT-Auction-Docker-DEV/1.0',
+}
+
+LISTING_FETCH_TIMEOUT_SECONDS = 30
+LISTING_RETRY_DELAY_SECONDS = 20
+
+def _load_listing_items_with_retry(url: str) -> list[dict]:
+    while True:
+        try:
+            response = requests.get(url, headers=GITHUB_HTTP_HEADERS, timeout=LISTING_FETCH_TIMEOUT_SECONDS)
+            response.raise_for_status()
+
+            payload = response.json()
+
+            if isinstance(payload, list):
+                return payload
+
+            if isinstance(payload, dict) and payload.get('content'):
+                content = payload['content']
+                if payload.get('encoding') == 'base64':
+                    content = base64.b64decode(content).decode('utf-8')
+                decoded = json.loads(content)
+                if isinstance(decoded, list):
+                    return decoded
+
+            raise ValueError('Некорректный формат listing.json: ожидался массив предметов')
+        except requests.Timeout as e:
+            log(
+                f"ERROR: Таймаут при получении listing ({url}): {e}. Повтор через {LISTING_RETRY_DELAY_SECONDS} сек.",
+                save=True,
+            )
+        except requests.RequestException as e:
+            log(
+                f"ERROR: Ошибка HTTP при получении listing ({url}): {e}. Повтор через {LISTING_RETRY_DELAY_SECONDS} сек.",
+                save=True,
+            )
+        except Exception as e:
+            log(
+                f"ERROR: Ошибка парсинга listing ({url}): {e}. Повтор через {LISTING_RETRY_DELAY_SECONDS} сек.",
+                save=True,
+            )
+
+        time.sleep(LISTING_RETRY_DELAY_SECONDS)
 
 
 async def get_history(item: Item, session: aiohttp.ClientSession, additional: str = 'false', limit: str = '20', offset: str = '0', region: str = 'RU', total_items: int = None, current_count: int = None) -> dict:
@@ -255,18 +302,7 @@ def sync_github_items_daily():
     time_start = time.time()
 
     try:
-        url = STALCRAFT_DATABASE_LISTING
-        response = requests.get(url)
-
-        if response.status_code != 200:
-            log(f"ERROR: Ошибка запроса: {response.status_code}", save=True)
-            return False
-
-        data = response.json()
-
-        # Декодируем base64 контент
-        content = base64.b64decode(data['content']).decode('utf-8')
-        items_data = json.loads(content)
+        items_data = _load_listing_items_with_retry(STALCRAFT_DATABASE_LISTING)
 
         # Подготавливаем данные для массовой обработки
         processed_data = []
@@ -276,7 +312,6 @@ def sync_github_items_daily():
 
                 item_id = item_path.split('/')[-1].replace('.json', '')
                 name = item_info['name']['lines']['ru']
-                # name_key = item_info['name']['key']  # Удалено
                 category = '/'.join(item_path.split('/')[2:-1])
                 color = item_info.get('color', 'DEFAULT')
 

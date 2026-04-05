@@ -72,7 +72,7 @@ DJANGO_SUPERUSER_PASSWORD=1234
 # STALCRAFT
 STALCRAFT_CLIENT_ID=SECRET_ID
 STALCRAFT_CLIENT_SECRET=SECRET_KEY
-STALCRAFT_DATABASE_LISTING=https://api.github.com/repos/EXBO-Studio/stalcraft-database/git/blobs/3a471a2d1325d8694405e1eec6af7a27fca96e53
+STALCRAFT_DATABASE_LISTING=https://raw.githubusercontent.com/EXBO-Studio/stalcraft-database/main/ru/listing.json
 
 # PostgreSQL
 POSTGRES_DATABASE_NAME=POSTGRESQL_DATABASE_NAME
@@ -93,7 +93,7 @@ REDIS_DB=0
 
 Примечание:
 - `STALCRAFT_CLIENT_ID` и `STALCRAFT_CLIENT_SECRET` - Получаются от разработчиков игры. Нужны для получения историй продаж (`start_get_history`).
-- `STALCRAFT_DATABASE_LISTING` - api.github для получения [listing.json](https://github.com/EXBO-Studio/stalcraft-database/blob/main/ru/listing.json) (список предметов)
+- `STALCRAFT_DATABASE_LISTING` - URL до [listing.json](https://github.com/EXBO-Studio/stalcraft-database/blob/main/ru/listing.json) (список предметов). Рекомендуется `raw .../main/ru/listing.json`, чтобы всегда получать актуальные категории и пути.
 
 ### 3. Запуск с помощью Docker
 Для запуска всех сервисов выполните:

@@ -15,6 +15,7 @@ import zoomPlugin from 'chartjs-plugin-zoom'
 import 'chartjs-adapter-date-fns'
 import { Line } from 'react-chartjs-2'
 import { fetchItemDetail, fetchItemSales } from '../api'
+import { translateCategoryPath, translateCategorySegment } from '../utils/categoryI18n'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Decimation, zoomPlugin)
 
@@ -270,6 +271,16 @@ function ItemDetailPage() {
   }
 
   const isArtefact = useMemo(() => item?.category?.split('/')[0] === 'artefact', [item])
+  const categoryParts = useMemo(() => {
+    if (!item?.category) return []
+    return item.category.split('/').filter(Boolean)
+  }, [item])
+  const categoryCrumbs = useMemo(() => {
+    return categoryParts.map((name, index) => ({
+      name,
+      path: categoryParts.slice(0, index + 1).join('/'),
+    }))
+  }, [categoryParts])
 
   const transformedSales = useMemo(() => {
     return (sales || [])
@@ -455,13 +466,27 @@ function ItemDetailPage() {
     <div className="glass-panel p-3 p-md-4">
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
         <div>
-          <Link to="/items" className="small text-secondary text-decoration-none">← Назад к списку</Link>
+          <div className="small text-secondary">
+            <Link to="/items" className="text-secondary text-decoration-none">Список предметов</Link>
+            {categoryCrumbs.map((crumb) => (
+              <span key={crumb.path}>
+                {' < '}
+                <Link
+                  to={`/items?category=${encodeURIComponent(crumb.path)}`}
+                  className="text-secondary text-decoration-none"
+                >
+                  {translateCategorySegment(crumb.name)}
+                </Link>
+              </span>
+            ))}
+            {item?.name ? ` < ${item.name}` : ''}
+          </div>
           <div className="d-flex align-items-center gap-2 mt-1">
-            <div className="item-icon-frame" style={{ borderColor: item.color }}>
+            <div className="item-icon-frame item-detail-icon-frame" style={{ borderColor: item.color }}>
               <img
                 src={getIconUrl(item)}
                 alt={item.name}
-                className="item-icon"
+                className="item-icon item-detail-icon"
                 loading="lazy"
                 onError={(event) => {
                   event.currentTarget.onerror = null
@@ -471,13 +496,13 @@ function ItemDetailPage() {
             </div>
             <div>
               <h3 className="mb-0">{item.name}</h3>
-              <div className="small text-secondary">{item.category} • {item.item_id}</div>
+              <div className="small text-secondary">{translateCategoryPath(item.category)} • {item.item_id}</div>
             </div>
           </div>
         </div>
 
-        <div className="d-flex align-items-center gap-2">
-          <label className="small text-secondary">Часовой пояс</label>
+        <div className="d-flex flex-nowrap align-items-center gap-2">
+          <label className="small text-secondary text-nowrap mb-0">Часовой пояс:</label>
           <select
             className="form-select form-select-sm"
             value={timezone}
@@ -490,112 +515,125 @@ function ItemDetailPage() {
         </div>
       </div>
 
-      <div className="row g-2 align-items-end mb-2">
-        <div className="col-6 col-md-2">
-          <label className="form-label small">Записей</label>
-          <input
-            className="form-control"
-            type="number"
-            min={2}
-            max={maxLimit}
-            value={limitInput}
-            onChange={(event) => setLimitInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                applyLimit()
-              }
-            }}
-          />
+      <div className="row g-2 align-items-stretch mb-2 flex-xl-nowrap">
+        <div className="col-16 col-xl">
+          <div className="border border-secondary-subtle rounded-3 p-2">
+            <div className="small text-secondary mb-1">Количество отображаемых записей:</div>
+            <div className="row g-1 align-items-end">
+              <div className="col-6 col-md-3 col-lg-2">
+                <input
+                  className="form-control form-control-sm"
+                  type="number"
+                  min={2}
+                  max={maxLimit}
+                  value={limitInput}
+                  onChange={(event) => setLimitInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      applyLimit()
+                    }
+                  }}
+                />
+              </div>
+              <div className="col-6 col-md-3 col-lg-2">
+                <button type="button" className="btn btn-accent btn-sm w-100 d-flex align-items-center justify-content-center" onClick={applyLimit}>Применить</button>
+              </div>
+              <div className="col-6 col-md-2 col-lg-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm w-100"
+                  onClick={() => {
+                    setLimitInput('100')
+                    setAppliedLimit(100)
+                  }}
+                >
+                  100
+                </button>
+              </div>
+              <div className="col-6 col-md-2 col-lg-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm w-100"
+                  onClick={() => {
+                    setLimitInput('200')
+                    setAppliedLimit(200)
+                  }}
+                >
+                  200
+                </button>
+              </div>
+              <div className="col-6 col-md-2 col-lg-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm w-100"
+                  onClick={() => {
+                    setLimitInput('2000')
+                    setAppliedLimit(2000)
+                  }}
+                >
+                  2000
+                </button>
+              </div>
+              <div className="col-6 col-md-2 col-lg-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-light btn-sm w-100"
+                  onClick={() => {
+                    setLimitInput(String(maxLimit))
+                    setAppliedLimit(maxLimit)
+                  }}
+                >
+                  {maxLimit}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="col-6 col-md-1">
-          <button type="button" className="btn btn-accent px-3" onClick={applyLimit}>Применить</button>
-        </div>
-        <div className="col-6 col-md-1">
-          <button
-            type="button"
-            className="btn btn-outline-light w-100"
-            onClick={() => {
-              setLimitInput('50')
-              setAppliedLimit(50)
-            }}
-          >
-            50
-          </button>
-        </div>
-        <div className="col-6 col-md-1">
-          <button
-            type="button"
-            className="btn btn-outline-light w-100"
-            onClick={() => {
-              setLimitInput('200')
-              setAppliedLimit(200)
-            }}
-          >
-            200
-          </button>
-        </div>
-        <div className="col-6 col-md-1">
-          <button
-            type="button"
-            className="btn btn-outline-light w-100"
-            onClick={() => {
-              setLimitInput('2000')
-              setAppliedLimit(2000)
-            }}
-          >
-            2000
-          </button>
-        </div>
-        <div className="col-6 col-md-1">
-          <button
-            type="button"
-            className="btn btn-outline-light w-100"
-            onClick={() => {
-              setLimitInput(String(maxLimit))
-              setAppliedLimit(maxLimit)
-            }}
-          >
-            {maxLimit}
-          </button>
-        </div>
-        <div className="col-6 col-md-1">
-          <button
-            type="button"
-            className="btn btn-outline-warning w-100"
-            onClick={() => chartRef.current?.resetZoom()}
-          >
-            Сбросить зум
-          </button>
-        </div>
-      </div>
+        <div className="col-12 col-xl">
+          <div className="border border-secondary-subtle rounded-3 p-2 h-100">
+            <div className="small text-secondary mb-1">Фильтры записей:</div>
+            <div className="row g-1">
+              <div className="col-6 col-md-2">
+                <input className="form-control form-control-sm" placeholder="Цена от" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} />
+              </div>
+              <div className="col-6 col-md-2">
+                <input className="form-control form-control-sm" placeholder="Цена до" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} />
+              </div>
 
-      <div className="row g-2 mb-3">
-        <div className="col-6 col-md-1">
-          <input className="form-control" placeholder="Цена от" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} />
+              {isArtefact && (
+                <>
+                  <div className="col-6 col-md-2">
+                    <input className="form-control form-control-sm" placeholder="Уровень от" value={minPtn} onChange={(event) => setMinPtn(event.target.value)} />
+                  </div>
+                  <div className="col-6 col-md-2">
+                    <input className="form-control form-control-sm" placeholder="Уровень до" value={maxPtn} onChange={(event) => setMaxPtn(event.target.value)} />
+                  </div>
+                  <div className="col-12 col-md-4">
+                    <select className="form-select form-select-sm" value={quality} onChange={(event) => setQuality(event.target.value)}>
+                      <option value="-1">Качество: любое</option>
+                      {Object.entries(QUALITY_LABELS).map(([key, value]) => (
+                        <option value={key} key={key}>{value}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="col-6 col-md-1">
-          <input className="form-control" placeholder="Цена до" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} />
+        <div className="col-12 col-xl-auto ms-xl-3">
+          <div className="border border-warning-subtle rounded-3 p-2 d-inline-flex flex-column">
+            <div className="small text-secondary mb-1">Управление графиком</div>
+            <button
+              type="button"
+              className="btn btn-outline-warning btn-sm"
+              onClick={() => chartRef.current?.resetZoom()}
+            >
+              Сбросить зум
+            </button>
+          </div>
         </div>
-
-        {isArtefact && (
-          <>
-            <div className="col-6 col-md-1">
-              <input className="form-control" placeholder="Уровень от" value={minPtn} onChange={(event) => setMinPtn(event.target.value)} />
-            </div>
-            <div className="col-6 col-md-1">
-              <input className="form-control" placeholder="Уровень до" value={maxPtn} onChange={(event) => setMaxPtn(event.target.value)} />
-            </div>
-            <div className="col-6 col-md-2">
-              <select className="form-select" value={quality} onChange={(event) => setQuality(event.target.value)}>
-                <option value="-1">Качество: любое</option>
-                {Object.entries(QUALITY_LABELS).map(([key, value]) => (
-                  <option value={key} key={key}>{value}</option>
-                ))}
-              </select>
-            </div>
-          </>
-        )}
       </div>
 
       <div className="chart-wrap">

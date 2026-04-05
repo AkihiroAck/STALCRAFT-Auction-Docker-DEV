@@ -1,6 +1,10 @@
 import datetime
 import json
 import os
+import io
+import re
+import hashlib
+from pathlib import Path
 from django.db import connection, models
 from django.conf import settings
 from django.urls import reverse
@@ -14,6 +18,8 @@ from django.core.paginator import Paginator
 from django.views.generic import CreateView
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.mixins import LoginRequiredMixin
+from PIL import Image
+import requests
 
 from scaw.celery import app as celery_app
 from .models import SaleHistory, Item
@@ -28,6 +34,8 @@ ALLOWED_MANUAL_TASKS = {
     'auction.tasks.delete_old_sales',
     'auction.tasks.start_get_history',
 }
+ICON_CATEGORY_RE = re.compile(r'^[a-z0-9_\-/]+$')
+ICON_ITEM_ID_RE = re.compile(r'^[a-z0-9_\-]+$', re.IGNORECASE)
 
 
 def _serialize_item(item):
@@ -95,6 +103,87 @@ def _tail_lines(file_path, lines=200):
         content = fp.readlines()
 
     return [line.rstrip('\n') for line in content[-lines:]]
+
+
+@require_GET
+def api_item_icon_thumb(request, category, item_id):
+    if not ICON_CATEGORY_RE.match(category) or not ICON_ITEM_ID_RE.match(item_id):
+        return HttpResponse(status=400)
+
+    try:
+        size = int(request.GET.get('size', 56))
+    except (TypeError, ValueError):
+        size = 56
+
+    size = min(max(size, 16), 256)
+
+    cache_dir = Path(settings.BASE_DIR) / 'icon_cache'
+    thumb_dir = cache_dir / 'thumbs'
+    source_dir = cache_dir / 'source'
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    source_key = hashlib.sha1(f'{category}|{item_id}'.encode('utf-8')).hexdigest()
+    thumb_key = hashlib.sha1(f'{category}|{item_id}|{size}'.encode('utf-8')).hexdigest()
+    source_file = source_dir / f'{source_key}.png'
+    missing_marker = source_dir / f'{source_key}.missing'
+    cache_file = thumb_dir / f'{thumb_key}.webp'
+
+    cache_headers = {
+        'Cache-Control': 'public, max-age=2592000, immutable, stale-while-revalidate=86400',
+        'Vary': 'Accept',
+        'ETag': thumb_key,
+    }
+
+    if cache_file.exists():
+        with cache_file.open('rb') as fp:
+            return HttpResponse(fp.read(), content_type='image/webp', headers=cache_headers)
+
+    # Do not hammer upstream for icons that are known missing.
+    missing_ttl_seconds = 6 * 60 * 60
+    if missing_marker.exists():
+        marker_age = datetime.datetime.now().timestamp() - missing_marker.stat().st_mtime
+        if marker_age < missing_ttl_seconds:
+            return HttpResponse(
+                status=404,
+                headers={'Cache-Control': 'public, max-age=300, stale-while-revalidate=300'},
+            )
+
+    source_url = f'https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{category}/{item_id}.png'
+
+    try:
+        if source_file.exists():
+            source_bytes = source_file.read_bytes()
+        else:
+            source_response = requests.get(source_url, timeout=12)
+            if source_response.status_code == 404:
+                missing_marker.touch(exist_ok=True)
+                return HttpResponse(
+                    status=404,
+                    headers={'Cache-Control': 'public, max-age=300, stale-while-revalidate=300'},
+                )
+            if source_response.status_code != 200:
+                return HttpResponse(status=502)
+
+            source_bytes = source_response.content
+            source_file.write_bytes(source_bytes)
+            if missing_marker.exists():
+                missing_marker.unlink(missing_ok=True)
+
+        with Image.open(io.BytesIO(source_bytes)) as img:
+            img = img.convert('RGBA')
+            img.thumbnail((size, size), Image.Resampling.LANCZOS)
+
+            out = io.BytesIO()
+            img.save(out, format='WEBP', quality=64, method=6)
+            data = out.getvalue()
+
+        with cache_file.open('wb') as fp:
+            fp.write(data)
+
+        return HttpResponse(data, content_type='image/webp', headers=cache_headers)
+    except Exception:
+        return HttpResponse(status=500)
 
 
 @require_GET

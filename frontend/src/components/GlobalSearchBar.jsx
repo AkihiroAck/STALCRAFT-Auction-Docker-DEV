@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fetchItemSuggestions } from '../api'
+import { fetchItemSuggestions, getOptimizedIconUrl } from '../api'
+import OptimizedItemImage from './OptimizedItemImage'
 
 const FALLBACK_ICON = 'http://localhost:8000/static/auction/media/no_item_icon.png'
 
 function getIconUrl(item) {
-  return `https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/${item.category}/${item.item_id}.png`
+  return getOptimizedIconUrl(item.category, item.item_id, 40)
 }
 
 function GlobalSearchBar() {
@@ -69,18 +70,15 @@ function GlobalSearchBar() {
               }}
             >
               <div className="search-suggestion-main">
-                <div className="item-icon-frame search-icon-frame">
-                  <img
-                    src={getIconUrl(suggestion)}
-                    alt={suggestion.name}
-                    className="item-icon"
-                    loading="lazy"
-                    onError={(event) => {
-                      event.currentTarget.onerror = null
-                      event.currentTarget.src = FALLBACK_ICON
-                    }}
-                  />
-                </div>
+                <OptimizedItemImage
+                  src={getIconUrl(suggestion)}
+                  alt={suggestion.name}
+                  fallbackSrc={FALLBACK_ICON}
+                  frameClassName="item-icon-frame search-icon-frame"
+                  imgClassName="item-icon"
+                  loading="eager"
+                  fetchPriority="high"
+                />
                 <div className="fw-semibold text-start search-suggestion-name">{suggestion.name}</div>
               </div>
             </button>

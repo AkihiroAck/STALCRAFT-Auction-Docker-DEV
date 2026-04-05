@@ -1,3 +1,5 @@
+import { translateCategorySegment } from '../utils/categoryI18n'
+
 function CategoryTree({ categories, selectedCategory, onSelect }) {
   return (
     <aside className="glass-panel category-panel p-3">
@@ -19,8 +21,8 @@ function CategoryTree({ categories, selectedCategory, onSelect }) {
             style={{ paddingLeft: `${10 + category.depth * 14}px` }}
             onClick={() => onSelect(category.fullPath)}
           >
-            <span>{category.name}</span>
-            <span className="badge bg-secondary-subtle text-light-emphasis">{category.count}</span>
+            <span>{translateCategorySegment(category.name)}</span>
+            <span className="badge bg-secondary-subtle text-light-emphasis ms-2">{category.count}</span>
           </button>
         ))}
       </div>

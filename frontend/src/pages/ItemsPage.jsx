@@ -1,19 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { fetchAllItems } from '../api'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { fetchAllItems, getOptimizedIconUrl } from '../api'
 import CategoryTree from '../components/CategoryTree'
+import OptimizedItemImage from '../components/OptimizedItemImage'
 import { flattenCategoryTree, itemBelongsToCategory } from '../utils/category'
+import { translateCategoryPath } from '../utils/categoryI18n'
 
 const FALLBACK_ICON = 'http://localhost:8000/static/auction/media/no_item_icon.png'
 
 function ItemsPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
   const [categoryTree, setCategoryTree] = useState([])
-  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category')?.trim() || 'all')
   const [searchValue, setSearchValue] = useState('')
+
+  useEffect(() => {
+    const categoryFromUrl = searchParams.get('category')?.trim() || 'all'
+    setSelectedCategory(categoryFromUrl)
+  }, [searchParams])
 
   useEffect(() => {
     let isActive = true
@@ -86,7 +94,7 @@ function ItemsPage() {
           </div>
 
           <div className="items-local-search">
-            <div className="input-group input-group-lg">
+            <div className="input-group input-group">
               <input
                 className="form-control search-input"
                 value={searchValue}
@@ -101,24 +109,22 @@ function ItemsPage() {
           </div>
 
           <div className="items-grid mt-4">
-            {filteredItems.map((item) => (
+            {filteredItems.map((item, index) => (
               <Link key={item.item_id} to={`/items/${item.item_id}`} className="item-card text-decoration-none">
                 <div className="item-card-row">
-                  <div className="item-icon-frame" style={{ borderColor: item.color }}>
-                    <img
-                      src={item.icon_url}
-                      alt={item.name}
-                      className="item-icon"
-                      loading="lazy"
-                      onError={(event) => {
-                        event.currentTarget.onerror = null
-                        event.currentTarget.src = FALLBACK_ICON
-                      }}
-                    />
-                  </div>
+                  <OptimizedItemImage
+                    src={getOptimizedIconUrl(item.category, item.item_id, 56)}
+                    alt={item.name}
+                    fallbackSrc={FALLBACK_ICON}
+                    frameClassName="item-icon-frame"
+                    frameStyle={{ borderColor: item.color }}
+                    imgClassName="item-icon"
+                    loading={index < 8 ? 'eager' : 'lazy'}
+                    fetchPriority={index < 4 ? 'high' : 'low'}
+                  />
                   <div className="item-meta">
                     <div className="item-title">{item.name}</div>
-                    <div className="item-subtitle">{item.category}</div>
+                    <div className="item-subtitle">{translateCategoryPath(item.category)}</div>
                   </div>
                 </div>
               </Link>
