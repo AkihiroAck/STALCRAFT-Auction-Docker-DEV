@@ -1,41 +1,28 @@
 import datetime
 import json
 import os
-import io
-import re
-import hashlib
-from pathlib import Path
 from django.db import connection, models
-from django.conf import settings
-from django.urls import reverse
 from django.utils import timezone
-from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 from django.core.paginator import Paginator
-from django.views.generic import CreateView
-from django.shortcuts import render, get_object_or_404, redirect
-from django.contrib.auth.mixins import LoginRequiredMixin
-from PIL import Image
-import requests
+from django.shortcuts import get_object_or_404
+from django.conf import settings
 
 from scaw.celery import app as celery_app
 from .models import SaleHistory, Item
-from .forms import SaleHistoryCreateForm
 from .constants import RANK_COLORS
 
 
 DEFAULT_LIMIT = 100
-MAX_LIMIT = 50000
+MAX_LIMIT = 2000
 ALLOWED_MANUAL_TASKS = {
     'auction.tasks.sync_github_items_daily',
     'auction.tasks.delete_old_sales',
     'auction.tasks.start_get_history',
 }
-ICON_CATEGORY_RE = re.compile(r'^[a-z0-9_\-/]+$')
-ICON_ITEM_ID_RE = re.compile(r'^[a-z0-9_\-]+$', re.IGNORECASE)
 
 
 def _serialize_item(item):
@@ -46,8 +33,17 @@ def _serialize_item(item):
         'category': item.category,
         'color': RANK_COLORS.get(item.color, RANK_COLORS['DEFAULT']),
         'rank': item.color,
+        'has_sales': bool(getattr(item, 'has_sales', False)),
         'icon_url': f"https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{item.category}/{item.item_id}.png",
     }
+
+
+def _with_sales_flag(queryset):
+    return queryset.annotate(
+        has_sales=models.Exists(
+            SaleHistory.objects.filter(item_id=models.OuterRef('pk'))
+        )
+    )
 
 
 def _build_category_tree(items_data):
@@ -99,91 +95,24 @@ def _tail_lines(file_path, lines=200):
     if not os.path.exists(file_path):
         return []
 
-    with open(file_path, 'r', encoding='utf-8', errors='replace') as fp:
-        content = fp.readlines()
+    # Read only the file tail to avoid expensive full-file reads on frequent polling.
+    max_bytes = 512 * 1024
+    chunk_size = 8192
 
-    return [line.rstrip('\n') for line in content[-lines:]]
+    with open(file_path, 'rb') as fp:
+        fp.seek(0, os.SEEK_END)
+        file_size = fp.tell()
+        read_size = min(file_size, max_bytes)
+        data = b''
 
+        while read_size > 0 and data.count(b'\n') <= lines:
+            current_chunk = min(chunk_size, read_size)
+            read_size -= current_chunk
+            fp.seek(read_size)
+            data = fp.read(current_chunk) + data
 
-@require_GET
-def api_item_icon_thumb(request, category, item_id):
-    if not ICON_CATEGORY_RE.match(category) or not ICON_ITEM_ID_RE.match(item_id):
-        return HttpResponse(status=400)
-
-    try:
-        size = int(request.GET.get('size', 56))
-    except (TypeError, ValueError):
-        size = 56
-
-    size = min(max(size, 16), 256)
-
-    cache_dir = Path(settings.BASE_DIR) / 'icon_cache'
-    thumb_dir = cache_dir / 'thumbs'
-    source_dir = cache_dir / 'source'
-    thumb_dir.mkdir(parents=True, exist_ok=True)
-    source_dir.mkdir(parents=True, exist_ok=True)
-
-    source_key = hashlib.sha1(f'{category}|{item_id}'.encode('utf-8')).hexdigest()
-    thumb_key = hashlib.sha1(f'{category}|{item_id}|{size}'.encode('utf-8')).hexdigest()
-    source_file = source_dir / f'{source_key}.png'
-    missing_marker = source_dir / f'{source_key}.missing'
-    cache_file = thumb_dir / f'{thumb_key}.webp'
-
-    cache_headers = {
-        'Cache-Control': 'public, max-age=2592000, immutable, stale-while-revalidate=86400',
-        'Vary': 'Accept',
-        'ETag': thumb_key,
-    }
-
-    if cache_file.exists():
-        with cache_file.open('rb') as fp:
-            return HttpResponse(fp.read(), content_type='image/webp', headers=cache_headers)
-
-    # Do not hammer upstream for icons that are known missing.
-    missing_ttl_seconds = 6 * 60 * 60
-    if missing_marker.exists():
-        marker_age = datetime.datetime.now().timestamp() - missing_marker.stat().st_mtime
-        if marker_age < missing_ttl_seconds:
-            return HttpResponse(
-                status=404,
-                headers={'Cache-Control': 'public, max-age=300, stale-while-revalidate=300'},
-            )
-
-    source_url = f'https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/{category}/{item_id}.png'
-
-    try:
-        if source_file.exists():
-            source_bytes = source_file.read_bytes()
-        else:
-            source_response = requests.get(source_url, timeout=12)
-            if source_response.status_code == 404:
-                missing_marker.touch(exist_ok=True)
-                return HttpResponse(
-                    status=404,
-                    headers={'Cache-Control': 'public, max-age=300, stale-while-revalidate=300'},
-                )
-            if source_response.status_code != 200:
-                return HttpResponse(status=502)
-
-            source_bytes = source_response.content
-            source_file.write_bytes(source_bytes)
-            if missing_marker.exists():
-                missing_marker.unlink(missing_ok=True)
-
-        with Image.open(io.BytesIO(source_bytes)) as img:
-            img = img.convert('RGBA')
-            img.thumbnail((size, size), Image.Resampling.LANCZOS)
-
-            out = io.BytesIO()
-            img.save(out, format='WEBP', quality=64, method=6)
-            data = out.getvalue()
-
-        with cache_file.open('wb') as fp:
-            fp.write(data)
-
-        return HttpResponse(data, content_type='image/webp', headers=cache_headers)
-    except Exception:
-        return HttpResponse(status=500)
+    content = data.decode('utf-8', errors='replace').splitlines()
+    return content[-lines:]
 
 
 @require_GET
@@ -249,13 +178,22 @@ def api_admin_celery_overview(request):
     if denied:
         return denied
 
-    inspector = celery_app.control.inspect(timeout=1.0)
+    active = {}
+    reserved = {}
+    scheduled = {}
+    registered = {}
+    stats = {}
+    celery_error = None
 
-    active = inspector.active() or {}
-    reserved = inspector.reserved() or {}
-    scheduled = inspector.scheduled() or {}
-    registered = inspector.registered() or {}
-    stats = inspector.stats() or {}
+    try:
+        inspector = celery_app.control.inspect(timeout=1.0)
+        active = inspector.active() or {}
+        reserved = inspector.reserved() or {}
+        scheduled = inspector.scheduled() or {}
+        registered = inspector.registered() or {}
+        stats = inspector.stats() or {}
+    except Exception as exc:
+        celery_error = str(exc)
 
     workers = sorted(set(active.keys()) | set(reserved.keys()) | set(scheduled.keys()) | set(stats.keys()))
 
@@ -302,14 +240,32 @@ def api_admin_celery_overview(request):
                 }
             )
 
+    beat_schedule = []
+    beat_schedule_raw = celery_app.conf.beat_schedule or {}
+    for name, entry in beat_schedule_raw.items():
+        beat_schedule.append(
+            {
+                'name': name,
+                'task': entry.get('task'),
+                'schedule': str(entry.get('schedule')),
+                'args': entry.get('args', []),
+                'kwargs': entry.get('kwargs', {}),
+            }
+        )
+
+    beat_schedule.sort(key=lambda item: item['name'])
+
     return JsonResponse(
         {
             'workers': workers,
             'running_tasks': running_tasks,
             'pending_tasks': pending_tasks,
+            'beat_schedule': beat_schedule,
             'registered_tasks': registered,
             'stats': stats,
             'manual_tasks': sorted(ALLOWED_MANUAL_TASKS),
+            'celery_available': celery_error is None,
+            'celery_error': celery_error,
         }
     )
 
@@ -405,7 +361,7 @@ def api_items(request):
 
     page_size = min(max(page_size, 1), 500)
 
-    items = Item.objects.all().order_by('name')
+    items = _with_sales_flag(Item.objects.all()).order_by('name')
 
     if search:
         items = items.filter(
@@ -433,7 +389,7 @@ def api_items(request):
 
 @require_GET
 def api_items_all(request):
-    items = Item.objects.all().order_by('name')
+    items = _with_sales_flag(Item.objects.all()).order_by('name')
 
     return JsonResponse(
         {
@@ -457,12 +413,26 @@ def api_item_suggest(request):
         return JsonResponse({'items': []})
 
     items = (
-        Item.objects.filter(name__icontains=query)
+        _with_sales_flag(Item.objects.filter(name__icontains=query))
         .order_by('name')
-        .values('item_id', 'name', 'category')[:limit]
+        .values('item_id', 'name', 'category', 'color', 'has_sales')[:limit]
     )
 
-    return JsonResponse({'items': list(items)})
+    return JsonResponse(
+        {
+            'items': [
+                {
+                    'item_id': item['item_id'],
+                    'name': item['name'],
+                    'category': item['category'],
+                    'rank': item['color'],
+                    'color': RANK_COLORS.get(item['color'], RANK_COLORS['DEFAULT']),
+                    'has_sales': bool(item.get('has_sales', False)),
+                }
+                for item in items
+            ]
+        }
+    )
 
 
 @require_GET
@@ -505,80 +475,6 @@ def api_item_sales(request, item_id):
 @csrf_exempt
 def api_process_lang_file(request):
     return process_lang_file(request)
-
-
-def item_list_view(request):
-    """
-    Просмотр списка предметов с поиском и пагинацией.
-    Поддерживает параметр search для поиска по name, category, item_id.
-    Поддерживает параметр page для пагинации (50 предметов на страницу).
-    Если запрос AJAX - возвращает JSON, иначе рендерит HTML-шаблон.
-    """
-    page = request.GET.get('page', 1)
-    search = request.GET.get('search', '')
-    
-    items = Item.objects.all().order_by('id')
-    
-    if search:
-        items = items.filter(
-            models.Q(name__icontains=search) |
-            models.Q(category__icontains=search) |
-            models.Q(item_id__icontains=search)
-        ).distinct()
-    
-    paginator = Paginator(items, 50)
-    page_obj = paginator.get_page(page)
-    
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        data = {
-            'items': [{
-                'id': item.id,
-                'item_id': item.item_id,
-                'name': item.name,
-                'category': item.category,
-                'color': RANK_COLORS[item.color],
-                'url': reverse('item-detail', args=[item.item_id])
-            } for item in page_obj],
-            'has_next': page_obj.has_next()
-        }
-        return JsonResponse(data)
-    
-    return render(request, 'auction/items_list.html')
-
-
-def item_detail_view(request, item_id):
-    """
-    Просмотр деталей предмета и его истории продаж.
-    Поддерживает параметр limit для ограничения количества записей в истории.
-    Если запрос AJAX - возвращает JSON, иначе рендерит HTML-шаблон.
-    """
-    item = get_object_or_404(Item, item_id=item_id)  # Получаем предмет по item_id, если не найдено, возвращаем 404
-    
-    # Получаем параметр limit из запроса и проверяем его корректность
-    # Если параметр limit не указан или некорректен, используем значение по умолчанию
-    try:
-        # Ограничиваем значение limit до MAX_LIMIT
-        limit = min(int(request.GET.get('limit', DEFAULT_LIMIT)), MAX_LIMIT)
-    except (TypeError, ValueError):
-        limit = DEFAULT_LIMIT
-    
-    # Получаем историю продаж с лимитом
-    sales = SaleHistory.objects.filter(item_id=item.id).order_by('-time')[:limit]
-
-    # Если запрос AJAX - возвращаем JSON
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        # Преобразуем QuerySet в список словарей для JSON
-        sales = list(sales.values('id', 'price', 'time', 'extra_data', 'item__name', 'item__color'))
-        return JsonResponse({
-            'sales': sales,
-            'colors': RANK_COLORS,
-        })
-    
-    # Если не AJAX - возвращаем HTML-шаблон
-    return render(request, 'auction/item_detail.html', {
-        'item': item,
-        'max_limit': MAX_LIMIT,
-    })
 
 
 def process_lang_file(request):
@@ -677,47 +573,3 @@ def process_lang_file(request):
     response = HttpResponse("\n".join(output_lines), content_type="text/plain; charset=utf-8")
     response["Content-Disposition"] = 'attachment; filename="ru.lang"'
     return response
-
-
-def upload_lang_page(request):
-    return render(request, "auction/upload_lang.html")
-
-
-class SaleHistoryCreateView(CreateView, LoginRequiredMixin):
-    """
-    Представление для создания записи о продаже.
-    """
-    model = SaleHistory
-    form_class = SaleHistoryCreateForm
-    template_name = 'auction/salehistory_create.html'
-
-    def dispatch(self, request, *args, **kwargs):
-        item_id = self.kwargs['item_id']
-        if item_id != 'sezonnyi_propusk':
-            messages.error(request, "Создание записей разрешено только для 'sezonnyi_propusk'")
-            return redirect('item-detail', item_id=item_id)
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_initial(self):
-        """Автоматически определяем item из URL"""
-        initial = super().get_initial()
-        item_id = self.kwargs['item_id']
-        initial['item'] = get_object_or_404(Item, item_id=item_id)
-        return initial
-
-    def form_valid(self, form):
-        # Устанавливает item из URL
-        item_id = self.kwargs['item_id']
-        form.instance.item = get_object_or_404(Item, item_id=item_id)
-        
-        # Устанавливает автоматические поля
-        form.instance.time = timezone.now().replace(microsecond=0)
-        form.instance.extra_data = {}
-        
-        try:
-            response = super().form_valid(form)
-            messages.success(self.request, 'Запись о продаже успешно создана!')
-            return response
-        except Exception as e:
-            messages.error(self.request, f'Ошибка при создании записи: {str(e)}')
-            return self.form_invalid(form)

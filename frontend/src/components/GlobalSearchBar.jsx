@@ -43,6 +43,12 @@ function GlobalSearchBar() {
     setShowSuggestions(false)
   }
 
+  const handleClear = () => {
+    setQuery('')
+    setSuggestions([])
+    setShowSuggestions(false)
+  }
+
   return (
     <div className="global-search position-relative">
       <form className="input-group input-group-sm" onSubmit={handleSubmit}>
@@ -54,6 +60,16 @@ function GlobalSearchBar() {
           onBlur={() => setTimeout(() => setShowSuggestions(false), 120)}
           placeholder="Глобальный поиск предмета"
         />
+        <button
+          className="btn btn-outline-secondary"
+          type="button"
+          onClick={handleClear}
+          disabled={!query}
+          title="Очистить поиск"
+          aria-label="Очистить поиск"
+        >
+          Очистить
+        </button>
         <button className="btn btn-accent" type="submit">Найти</button>
       </form>
 
@@ -75,11 +91,19 @@ function GlobalSearchBar() {
                   alt={suggestion.name}
                   fallbackSrc={FALLBACK_ICON}
                   frameClassName="item-icon-frame search-icon-frame"
+                  frameStyle={{ borderColor: suggestion.color }}
                   imgClassName="item-icon"
                   loading="eager"
                   fetchPriority="high"
                 />
-                <div className="fw-semibold text-start search-suggestion-name">{suggestion.name}</div>
+                <div className="search-suggestion-meta">
+                  <div className="fw-semibold text-start search-suggestion-name">{suggestion.name}</div>
+                </div>
+                {suggestion.has_sales ? (
+                  <span className="search-sales-indicator" title="Есть записи продаж" aria-label="Есть записи продаж">
+                    ⚖
+                  </span>
+                ) : null}
               </div>
             </button>
           ))}

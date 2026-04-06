@@ -20,7 +20,7 @@ export const CATEGORY_SEGMENT_RU = {
     barrel: 'Надульники и глушители',
     accessory: 'Аксессуары',
     handgrips: 'Рукоятки',
-    other: 'Прочие обвесы',
+    other: 'Прочее',
     collimator_sights: 'Прицелы',
     forend: 'Цевья и крепления',
     mag: 'Магазины',
@@ -53,16 +53,30 @@ export const CATEGORY_SEGMENT_RU = {
     weapon_module_remover: 'Квазидеструкторы',
 }
 
-export function translateCategorySegment(segment) {
+export const CATEGORY_PATH_RU = {
+    'attachment/other': 'Прочие обвесы',
+}
+
+export function translateCategorySegment(segment, pathContext = '') {
     if (!segment) return ''
+
+    const normalizedPath = String(pathContext || '').replace(/^\/+|\/+$/g, '')
+    if (normalizedPath && CATEGORY_PATH_RU[normalizedPath]) {
+        return CATEGORY_PATH_RU[normalizedPath]
+    }
+
     return CATEGORY_SEGMENT_RU[segment] || segment
 }
 
 export function translateCategoryPath(path) {
     if (!path) return ''
-    return String(path)
+    const parts = String(path)
         .split('/')
         .filter(Boolean)
-        .map((segment) => translateCategorySegment(segment))
+    return parts
+        .map((segment, index) => {
+            const currentPath = parts.slice(0, index + 1).join('/')
+            return translateCategorySegment(segment, currentPath)
+        })
         .join('/')
 }

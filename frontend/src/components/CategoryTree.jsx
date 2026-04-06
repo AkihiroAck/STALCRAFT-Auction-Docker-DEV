@@ -21,7 +21,7 @@ function CategoryTree({ categories, selectedCategory, onSelect }) {
             style={{ paddingLeft: `${10 + category.depth * 14}px` }}
             onClick={() => onSelect(category.fullPath)}
           >
-            <span>{translateCategorySegment(category.name)}</span>
+              <span>{translateCategorySegment(category.name, category.fullPath)}</span>
             <span className="badge bg-secondary-subtle text-light-emphasis ms-2">{category.count}</span>
           </button>
         ))}

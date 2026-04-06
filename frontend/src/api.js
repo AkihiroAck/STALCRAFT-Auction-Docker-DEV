@@ -1,5 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/auction/api'
-const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, '')
+const SALES_MAX_LIMIT = 2000
 
 function encodeCategoryPath(category) {
   return String(category || '')
@@ -8,11 +8,25 @@ function encodeCategoryPath(category) {
     .join('/')
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    credentials: 'include',
-    ...options,
-  })
+async function request(path, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  let response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      credentials: 'include',
+      ...options,
+      signal: options.signal || controller.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Request timeout')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   if (!response.ok) {
     const text = await response.text()
@@ -37,7 +51,8 @@ export async function fetchItemSuggestions(query, limit = 8) {
 }
 
 export function getOptimizedIconUrl(category, itemId, size = 56) {
-  return `${BACKEND_BASE}/api/icons/${encodeCategoryPath(category)}/${encodeURIComponent(itemId)}/?size=${size}`
+  void size
+  return `https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/${encodeCategoryPath(category)}/${encodeURIComponent(itemId)}.png`
 }
 
 export async function fetchItemDetail(itemId) {
@@ -45,7 +60,8 @@ export async function fetchItemDetail(itemId) {
 }
 
 export async function fetchItemSales(itemId, limit = 100) {
-  return request(`/items/${encodeURIComponent(itemId)}/sales/?limit=${limit}`)
+  const safeLimit = Math.max(2, Math.min(Number(limit) || 100, SALES_MAX_LIMIT))
+  return request(`/items/${encodeURIComponent(itemId)}/sales/?limit=${safeLimit}`)
 }
 
 export async function processLangFile(file, months) {
@@ -62,7 +78,7 @@ export async function processLangFile(file, months) {
 }
 
 export async function authMe() {
-  return request('/auth/me/')
+  return request('/auth/me/', {}, 12000)
 }
 
 export async function authLogin(username, password) {
@@ -80,11 +96,11 @@ export async function authLogout() {
 }
 
 export async function fetchCeleryOverview() {
-  return request('/admin/celery/overview/')
+  return request('/admin/celery/overview/', {}, 30000)
 }
 
-export async function fetchCeleryLogs(source = 'app', lines = 250) {
-  return request(`/admin/celery/logs/?source=${encodeURIComponent(source)}&lines=${lines}`)
+export async function fetchCeleryLogs(source = 'app', lines = 80) {
+  return request(`/admin/celery/logs/?source=${encodeURIComponent(source)}&lines=${lines}`, {}, 30000)
 }
 
 export async function startCeleryTask(taskName, args = [], kwargs = {}) {

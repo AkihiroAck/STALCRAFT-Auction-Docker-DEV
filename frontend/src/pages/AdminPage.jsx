@@ -1,26 +1,61 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  authLogin,
-  authLogout,
-  authMe,
-  fetchCeleryLogs,
-  fetchCeleryOverview,
-  startCeleryTask,
-  stopCeleryTask,
-} from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { authLogin, authLogout, authMe, fetchCeleryOverview } from '../api'
+import AdminLoginPanel from '../components/AdminLoginPanel'
+
+const ADMIN_AUTH_FLAG_KEY = 'admin-authenticated'
+const ADMIN_AUTH_USERNAME_KEY = 'admin-username'
+
+function getCachedAdminAuth() {
+  if (typeof window === 'undefined') return { authenticated: false, username: null }
+  const authenticated = window.sessionStorage.getItem(ADMIN_AUTH_FLAG_KEY) === '1'
+  const username = window.sessionStorage.getItem(ADMIN_AUTH_USERNAME_KEY)
+  return { authenticated, username }
+}
 
 function AdminPage() {
-  const [authState, setAuthState] = useState({ loading: true, authenticated: false, is_staff: false, username: null })
+  const navigate = useNavigate()
+  const cachedAuth = getCachedAdminAuth()
+  const [authState, setAuthState] = useState({
+    loading: true,
+    authenticated: cachedAuth.authenticated,
+    is_staff: cachedAuth.authenticated,
+    username: cachedAuth.username,
+  })
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
   const [loginError, setLoginError] = useState('')
 
   const [overview, setOverview] = useState({ workers: [], running_tasks: [], pending_tasks: [], manual_tasks: [] })
-  const [selectedTask, setSelectedTask] = useState('')
-  const [logSource, setLogSource] = useState('app')
-  const [logs, setLogs] = useState([])
-  const [actionStatus, setActionStatus] = useState('')
+  const [overviewLoading, setOverviewLoading] = useState(true)
+  const [overviewStatus, setOverviewStatus] = useState('success')
+  const hasOverviewLoadedRef = useRef(false)
 
   const isAdmin = authState.authenticated && authState.is_staff
+  const accessLevel = authState.is_superuser ? 'Superuser' : 'Staff'
+  const workersOnline = useMemo(() => {
+    const directWorkers = Array.isArray(overview.workers) ? overview.workers.length : 0
+    const registeredWorkers = overview.registered_tasks && typeof overview.registered_tasks === 'object'
+      ? Object.keys(overview.registered_tasks).length
+      : 0
+    const statsWorkers = overview.stats && typeof overview.stats === 'object'
+      ? Object.keys(overview.stats).length
+      : 0
+
+    return Math.max(directWorkers, registeredWorkers, statsWorkers)
+  }, [overview])
+  const periodicCount = (overview.beat_schedule || []).length
+  const displayedOverviewStatus = useMemo(() => {
+    if (!overviewLoading) return overviewStatus
+    return overviewStatus === 'timeout' || overviewStatus === 'error' ? overviewStatus : 'loading'
+  }, [overviewLoading, overviewStatus])
+  const scheduledCount = useMemo(
+    () => (overview.pending_tasks || []).filter((task) => task.state === 'scheduled').length,
+    [overview]
+  )
+  const reservedCount = useMemo(
+    () => (overview.pending_tasks || []).filter((task) => task.state === 'reserved').length,
+    [overview]
+  )
 
   useEffect(() => {
     let isActive = true
@@ -30,8 +65,24 @@ function AdminPage() {
         const me = await authMe()
         if (!isActive) return
         setAuthState({ loading: false, ...me })
+        if (me?.authenticated && me?.is_staff) {
+          window.sessionStorage.setItem(ADMIN_AUTH_FLAG_KEY, '1')
+          if (me?.username) window.sessionStorage.setItem(ADMIN_AUTH_USERNAME_KEY, me.username)
+        } else {
+          window.sessionStorage.removeItem(ADMIN_AUTH_FLAG_KEY)
+          window.sessionStorage.removeItem(ADMIN_AUTH_USERNAME_KEY)
+        }
       } catch {
         if (!isActive) return
+        if (cachedAuth.authenticated) {
+          setAuthState({
+            loading: false,
+            authenticated: true,
+            is_staff: true,
+            username: cachedAuth.username,
+          })
+          return
+        }
         setAuthState({ loading: false, authenticated: false, is_staff: false, username: null })
       }
     }
@@ -46,54 +97,45 @@ function AdminPage() {
     if (!isAdmin) return undefined
 
     let isActive = true
+    let timerId
 
     const fetchOverview = async () => {
       try {
+        setOverviewLoading(true)
         const data = await fetchCeleryOverview()
         if (!isActive) return
         setOverview(data)
-        if (!selectedTask && data.manual_tasks?.length) {
-          setSelectedTask(data.manual_tasks[0])
+        if (data.celery_error) {
+          console.error('[AdminPage] Celery overview error:', data.celery_error)
+          setOverviewStatus(data.celery_error.toLowerCase().includes('timeout') ? 'timeout' : 'error')
+        } else {
+          setOverviewStatus('success')
         }
-      } catch {
+        hasOverviewLoadedRef.current = true
+        setOverviewLoading(false)
+      } catch (error) {
         if (!isActive) return
+        const message = error?.message || 'Request timeout'
+        setOverviewStatus(message.toLowerCase().includes('timeout') ? 'timeout' : 'error')
+        setOverviewLoading(false)
+        if (message.toLowerCase().includes('timeout')) {
+          console.error('[AdminPage] Celery overview request failed: Request timeout')
+        } else {
+          console.error('[AdminPage] Celery overview request failed:', message)
+        }
+      } finally {
+        if (!isActive) return
+        timerId = setTimeout(fetchOverview, 4000)
       }
     }
 
     fetchOverview()
-    const interval = setInterval(fetchOverview, 4000)
 
     return () => {
       isActive = false
-      clearInterval(interval)
+      clearTimeout(timerId)
     }
-  }, [isAdmin, selectedTask])
-
-  useEffect(() => {
-    if (!isAdmin) return undefined
-
-    let isActive = true
-
-    const fetchLogs = async () => {
-      try {
-        const data = await fetchCeleryLogs(logSource, 250)
-        if (!isActive) return
-        setLogs(data.lines || [])
-      } catch {
-        if (!isActive) return
-      }
-    }
-
-    fetchLogs()
-    const interval = setInterval(fetchLogs, 2000)
-
-    return () => {
-      isActive = false
-      clearInterval(interval)
-    }
-  }, [isAdmin, logSource])
-
-  const runningTaskIds = useMemo(() => new Set((overview.running_tasks || []).map((task) => task.id)), [overview.running_tasks])
+  }, [isAdmin])
 
   const handleLogin = async (event) => {
     event.preventDefault()
@@ -102,6 +144,9 @@ function AdminPage() {
     try {
       const result = await authLogin(loginForm.username, loginForm.password)
       setAuthState({ loading: false, authenticated: true, ...result })
+      window.sessionStorage.setItem(ADMIN_AUTH_FLAG_KEY, '1')
+      window.sessionStorage.setItem(ADMIN_AUTH_USERNAME_KEY, result.username || loginForm.username)
+      window.dispatchEvent(new CustomEvent('admin-auth-changed', { detail: { authenticated: true } }))
       setLoginForm({ username: '', password: '' })
     } catch (error) {
       setLoginError(error.message || 'Ошибка входа')
@@ -111,25 +156,10 @@ function AdminPage() {
   const handleLogout = async () => {
     await authLogout()
     setAuthState({ loading: false, authenticated: false, is_staff: false, username: null })
-  }
-
-  const handleStartTask = async () => {
-    if (!selectedTask) return
-    try {
-      const result = await startCeleryTask(selectedTask)
-      setActionStatus(`Запущена задача ${result.task_name} (${result.task_id})`)
-    } catch (error) {
-      setActionStatus(error.message || 'Не удалось запустить задачу')
-    }
-  }
-
-  const handleStopTask = async (taskId) => {
-    try {
-      await stopCeleryTask(taskId, true, 'SIGTERM')
-      setActionStatus(`Задача ${taskId} остановлена`)
-    } catch (error) {
-      setActionStatus(error.message || 'Не удалось остановить задачу')
-    }
+    window.sessionStorage.removeItem(ADMIN_AUTH_FLAG_KEY)
+    window.sessionStorage.removeItem(ADMIN_AUTH_USERNAME_KEY)
+    window.dispatchEvent(new CustomEvent('admin-auth-changed', { detail: { authenticated: false } }))
+    navigate('/')
   }
 
   if (authState.loading) {
@@ -138,28 +168,16 @@ function AdminPage() {
 
   if (!isAdmin) {
     return (
-      <div className="glass-panel p-4 admin-login-panel">
-        <h3 className="mb-3">Вход администратора</h3>
-        <p className="text-secondary">Авторизуйтесь учетной записью Django superuser/staff для доступа к Celery панели.</p>
-
-        <form className="d-flex flex-column gap-3" onSubmit={handleLogin}>
-          <input
-            className="form-control"
-            placeholder="Username"
-            value={loginForm.username}
-            onChange={(event) => setLoginForm((prev) => ({ ...prev, username: event.target.value }))}
-          />
-          <input
-            className="form-control"
-            type="password"
-            placeholder="Password"
-            value={loginForm.password}
-            onChange={(event) => setLoginForm((prev) => ({ ...prev, password: event.target.value }))}
-          />
-          {loginError && <div className="alert alert-danger mb-0">{loginError}</div>}
-          <button className="btn btn-accent align-self-start" type="submit">Войти</button>
-        </form>
-      </div>
+      <AdminLoginPanel
+        accessTargetText="[ЦEHTP_УПР4ВЛ3HИЯ]"
+        submitCipherText="П0ДТВ3РДИТЬ"
+        username={loginForm.username}
+        password={loginForm.password}
+        loginError={loginError}
+        onSubmit={handleLogin}
+        onUsernameChange={(value) => setLoginForm((prev) => ({ ...prev, username: value }))}
+        onPasswordChange={(value) => setLoginForm((prev) => ({ ...prev, password: value }))}
+      />
     )
   }
 
@@ -167,76 +185,73 @@ function AdminPage() {
     <div className="d-flex flex-column gap-3">
       <div className="glass-panel p-3 d-flex justify-content-between align-items-center flex-wrap gap-3">
         <div>
-          <h4 className="mb-1">Celery Monitor</h4>
-          <div className="small text-secondary">Администратор: {authState.username}</div>
+          <h4 className="mb-2">Центр управления</h4>
+          <div className="small text-secondary">Логин: {authState.username}</div>
+          <div className="small text-secondary">Уровень доступа: {accessLevel}</div>
         </div>
-        <button type="button" className="btn btn-outline-light" onClick={handleLogout}>Выйти</button>
       </div>
 
-      <div className="row g-3">
-        <div className="col-12 col-xl-4">
-          <div className="glass-panel p-3 h-100">
-            <h6 className="panel-title mb-3">Управление задачами</h6>
+      <div className="row g-3 row-cols-1 row-cols-md-2 row-cols-xl-3">
 
-            <label className="small text-secondary mb-1">Запуск задачи</label>
-            <div className="d-flex gap-2">
-              <select className="form-select" value={selectedTask} onChange={(event) => setSelectedTask(event.target.value)}>
-                {(overview.manual_tasks || []).map((taskName) => (
-                  <option key={taskName} value={taskName}>{taskName}</option>
-                ))}
-              </select>
-              <button type="button" className="btn btn-accent" onClick={handleStartTask}>Start</button>
-            </div>
-
-            <div className="mt-3 small text-secondary">Workers online: {overview.workers?.length || 0}</div>
-            <div className="small text-secondary">Running: {overview.running_tasks?.length || 0}</div>
-            <div className="small text-secondary">Pending: {overview.pending_tasks?.length || 0}</div>
-
-            {actionStatus && <div className="alert alert-info mt-3 mb-0 py-2">{actionStatus}</div>}
-          </div>
-        </div>
-
-        <div className="col-12 col-xl-8">
-          <div className="glass-panel p-3 h-100">
-            <h6 className="panel-title mb-3">Активные задачи</h6>
-
-            {overview.running_tasks?.length ? (
-              <div className="d-flex flex-column gap-2">
-                {overview.running_tasks.map((task) => (
-                  <div key={task.id} className="admin-task-row">
-                    <div>
-                      <div className="fw-semibold">{task.name}</div>
-                      <div className="small text-secondary">{task.id}</div>
-                      <div className="small text-secondary">Worker: {task.worker}</div>
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-danger"
-                      disabled={!runningTaskIds.has(task.id)}
-                      onClick={() => handleStopTask(task.id)}
-                    >
-                      Stop
-                    </button>
-                  </div>
-                ))}
+        <div className="col">
+          <div className="glass-panel p-3 h-100 d-flex flex-column">
+            <h6 className="panel-title mb-2">Celery Tasks</h6>
+            <div className="small text-secondary mb-3">Мониторинг воркеров, запуск и остановка задач, просмотр логов.</div>
+            <div className="d-flex justify-content-between align-items-start gap-2 mb-3">
+              <div>
+                <div className="small text-secondary">Workers online: {workersOnline}</div>
+                <div className="small text-secondary">Running: {overview.running_tasks?.length || 0}</div>
+                <div className="small text-secondary">Pending: {overview.pending_tasks?.length || 0}</div>
               </div>
-            ) : (
-              <div className="text-secondary">Сейчас нет активных задач.</div>
-            )}
+              <div
+                className={`admin-status-dot admin-status-${displayedOverviewStatus}`}
+                role="status"
+                aria-label={`Статус Celery: ${displayedOverviewStatus}`}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-accent mt-auto"
+              onClick={() => navigate('/control-center/celery-tasks')}
+            >
+              Открыть
+            </button>
           </div>
         </div>
-      </div>
 
-      <div className="glass-panel p-3">
-        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h6 className="panel-title mb-0">Логи в реальном времени</h6>
-          <select className="form-select admin-log-source" value={logSource} onChange={(event) => setLogSource(event.target.value)}>
-            <option value="app">Task logs (app)</option>
-            <option value="worker">Worker logs</option>
-            <option value="beat">Beat logs</option>
-          </select>
+        <div className="col">
+          <div className="glass-panel p-3 h-100 d-flex flex-column">
+            <h6 className="panel-title mb-2">Celery Scheduler</h6>
+            <div className="small text-secondary mb-3">Просмотр и отмена запланированных/ожидающих задач.</div>
+            <div className="d-flex justify-content-between align-items-start gap-2 mb-3">
+              <div>
+                <div className="small text-secondary">Periodic: {periodicCount}</div>
+                <div className="small text-secondary">Scheduled: {scheduledCount}</div>
+                <div className="small text-secondary">Reserved: {reservedCount}</div>
+              </div>
+              <div
+                className={`admin-status-dot admin-status-${displayedOverviewStatus}`}
+                role="status"
+                aria-label={`Статус планировщика: ${displayedOverviewStatus}`}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-accent mt-auto"
+              onClick={() => navigate('/control-center/celery-scheduler')}
+            >
+              Открыть
+            </button>
+          </div>
         </div>
-        <pre className="admin-log-box mb-0">{logs.join('\n') || 'Логи пока пусты'}</pre>
+
+        <div className="col">
+          <div className="glass-panel p-3 h-100 d-flex flex-column">
+            <h6 className="panel-title mb-2">Инструмент 3</h6>
+            <div className="small text-secondary mb-3">Скоро здесь появится новый модуль управления.</div>
+            <button type="button" className="btn btn-sm btn-outline-secondary mt-auto" disabled>Скоро</button>
+          </div>
+        </div>
       </div>
     </div>
   )

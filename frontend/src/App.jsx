@@ -1,40 +1,92 @@
-import { Link, NavLink, Route, Routes } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Route, Routes, useNavigate } from 'react-router-dom'
 import ItemsPage from './pages/ItemsPage'
 import ItemDetailPage from './pages/ItemDetailPage'
 import UploadLangPage from './pages/UploadLangPage'
-import GlobalSearchBar from './components/GlobalSearchBar'
+import AppLayout from './components/AppLayout'
 import AdminPage from './pages/AdminPage'
+import AdminCeleryTasksPage from './pages/AdminCeleryTasksPage'
+import AdminCelerySchedulerPage from './pages/AdminCelerySchedulerPage'
+import { authLogout, authMe } from './api'
+
+const ADMIN_AUTH_FLAG_KEY = 'admin-authenticated'
 
 function App() {
-  return (
-    <div className="app-shell">
-      <header className="topbar border-bottom border-secondary-subtle">
-        <div className="container-fluid py-3 px-4 d-flex align-items-center justify-content-between gap-3 flex-wrap">
-          <div className="d-flex align-items-center gap-4">
-            <Link to="/" className="brand-link">STALCRAFT AUCTION</Link>
-            <nav className="d-flex align-items-center gap-2">
-              <NavLink className="nav-pill" to="/items">Предметы</NavLink>
-              <NavLink className="nav-pill" to="/upload-lang">AVG to lang</NavLink>
-              <NavLink className="nav-pill" to="/admin-panel">Админ</NavLink>
-            </nav>
-          </div>
-          <div className="d-flex align-items-center gap-3">
-            <GlobalSearchBar />
-            <div className="text-secondary small d-none d-xl-block">Dark analytics interface</div>
-          </div>
-        </div>
-      </header>
+  const navigate = useNavigate()
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.sessionStorage.getItem(ADMIN_AUTH_FLAG_KEY) === '1'
+  })
 
-      <main className="container-fluid px-4 py-4">
+  useEffect(() => {
+    let isActive = true
+
+    async function refreshAdminAuth() {
+      try {
+        const me = await authMe()
+        if (!isActive) return
+        const authenticated = Boolean(me?.authenticated && me?.is_staff)
+        setIsAdminAuthenticated(authenticated)
+        if (authenticated) {
+          window.sessionStorage.setItem(ADMIN_AUTH_FLAG_KEY, '1')
+        } else {
+          window.sessionStorage.removeItem(ADMIN_AUTH_FLAG_KEY)
+        }
+      } catch {
+        if (!isActive) return
+        setIsAdminAuthenticated(window.sessionStorage.getItem(ADMIN_AUTH_FLAG_KEY) === '1')
+      }
+    }
+
+    const handleAuthChanged = () => {
+      refreshAdminAuth()
+    }
+
+    refreshAdminAuth()
+    window.addEventListener('admin-auth-changed', handleAuthChanged)
+
+    return () => {
+      isActive = false
+      window.removeEventListener('admin-auth-changed', handleAuthChanged)
+    }
+  }, [])
+
+  const handleAdminLogin = () => {
+    navigate('/control-center')
+  }
+
+  const handleAdminCenter = () => {
+    navigate('/control-center')
+  }
+
+  const handleAdminLogout = async () => {
+    try {
+      await authLogout()
+    } finally {
+      setIsAdminAuthenticated(false)
+      window.sessionStorage.removeItem(ADMIN_AUTH_FLAG_KEY)
+      window.dispatchEvent(new CustomEvent('admin-auth-changed', { detail: { authenticated: false } }))
+      navigate('/')
+    }
+  }
+
+  return (
+    <AppLayout
+      isAdminAuthenticated={isAdminAuthenticated}
+      onAdminLogin={handleAdminLogin}
+      onAdminCenter={handleAdminCenter}
+      onAdminLogout={handleAdminLogout}
+    >
         <Routes>
           <Route path="/" element={<ItemsPage />} />
           <Route path="/items" element={<ItemsPage />} />
           <Route path="/items/:itemId" element={<ItemDetailPage />} />
           <Route path="/upload-lang" element={<UploadLangPage />} />
-          <Route path="/admin-panel" element={<AdminPage />} />
+          <Route path="/control-center" element={<AdminPage />} />
+          <Route path="/control-center/celery-tasks" element={<AdminCeleryTasksPage />} />
+          <Route path="/control-center/celery-scheduler" element={<AdminCelerySchedulerPage />} />
         </Routes>
-      </main>
-    </div>
+    </AppLayout>
   )
 }
 

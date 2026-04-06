@@ -15,7 +15,7 @@ import zoomPlugin from 'chartjs-plugin-zoom'
 import 'chartjs-adapter-date-fns'
 import { Line } from 'react-chartjs-2'
 import { fetchItemDetail, fetchItemSales } from '../api'
-import { translateCategoryPath, translateCategorySegment } from '../utils/categoryI18n'
+import { translateCategorySegment } from '../utils/categoryI18n'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Decimation, zoomPlugin)
 
@@ -198,14 +198,40 @@ function getIconUrl(item) {
   return `https://github.com/EXBO-Studio/stalcraft-database/raw/main/ru/icons/${item.category}/${item.item_id}.png`
 }
 
+function parseOptionalNumber(value, { min = null, max = null } = {}) {
+  const normalized = String(value ?? '').trim()
+  if (normalized === '') return null
+
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) return null
+
+  let bounded = parsed
+  if (min !== null) bounded = Math.max(min, bounded)
+  if (max !== null) bounded = Math.min(max, bounded)
+
+  return bounded
+}
+
+function sanitizeDigitsInput(value) {
+  return String(value ?? '').replace(/\D+/g, '')
+}
+
+function normalizeDigitsValue(value, { min = null, max = null } = {}) {
+  const parsed = parseOptionalNumber(sanitizeDigitsInput(value), { min, max })
+  if (parsed === null) return ''
+  return String(Math.trunc(parsed))
+}
+
 function ItemDetailPage() {
   const { itemId } = useParams()
   const chartRef = useRef(null)
+  const itemChangePendingRef = useRef(false)
 
   const [item, setItem] = useState(null)
   const [limitInput, setLimitInput] = useState('100')
   const [appliedLimit, setAppliedLimit] = useState(100)
-  const [maxLimit, setMaxLimit] = useState(50000)
+  const [limitReloadTick, setLimitReloadTick] = useState(0)
+  const [maxLimit, setMaxLimit] = useState(2000)
   const [sales, setSales] = useState([])
   const [colors, setColors] = useState({})
   const [isLoading, setIsLoading] = useState(true)
@@ -230,6 +256,18 @@ function ItemDetailPage() {
   }, [timezone])
 
   useEffect(() => {
+    itemChangePendingRef.current = true
+    setLimitInput('100')
+    setAppliedLimit(100)
+  }, [itemId])
+
+  useEffect(() => {
+    if (itemChangePendingRef.current && appliedLimit !== 100) {
+      return
+    }
+
+    itemChangePendingRef.current = false
+
     let isActive = true
 
     async function run() {
@@ -247,6 +285,7 @@ function ItemDetailPage() {
         setMaxLimit(detail.max_limit)
         setSales(salesData.sales || [])
         setColors(salesData.colors || {})
+        setLimitInput(String((salesData.sales || []).length))
       } catch (loadError) {
         if (!isActive) return
         setError(loadError.message || 'Ошибка загрузки')
@@ -259,15 +298,54 @@ function ItemDetailPage() {
     return () => {
       isActive = false
     }
-  }, [itemId, appliedLimit])
+  }, [itemId, appliedLimit, limitReloadTick])
 
   const applyLimit = () => {
     const parsed = Number(limitInput)
     if (!Number.isFinite(parsed)) return
 
     const nextLimit = Math.min(maxLimit, Math.max(2, Math.floor(parsed)))
+    if (nextLimit === appliedLimit) {
+      setLimitReloadTick((value) => value + 1)
+      return
+    }
+
     setLimitInput(String(nextLimit))
     setAppliedLimit(nextLimit)
+  }
+
+  const applyPresetLimit = (value) => {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) return
+
+    const nextLimit = Math.min(maxLimit, Math.max(2, Math.floor(parsed)))
+    if (nextLimit === appliedLimit) {
+      setLimitReloadTick((value) => value + 1)
+      return
+    }
+
+    setLimitInput(String(nextLimit))
+    setAppliedLimit(nextLimit)
+  }
+
+  const getDefaultLimitValue = () => {
+    const parsedMaxLimit = Number(maxLimit)
+    if (!Number.isFinite(parsedMaxLimit)) return 100
+    return Math.max(2, Math.min(100, Math.floor(parsedMaxLimit)))
+  }
+
+  const resetLimitInputToDefault = () => {
+    const defaultLimit = getDefaultLimitValue()
+    setLimitInput(String(defaultLimit))
+    setAppliedLimit(defaultLimit)
+  }
+
+  const clearAllFilters = () => {
+    setMinPrice('')
+    setMaxPrice('')
+    setMinPtn('')
+    setMaxPtn('')
+    setQuality('-1')
   }
 
   const isArtefact = useMemo(() => item?.category?.split('/')[0] === 'artefact', [item])
@@ -306,16 +384,16 @@ function ItemDetailPage() {
   }, [sales, colors, timezone])
 
   const filteredSales = useMemo(() => {
-    const min = minPrice.trim() === '' ? null : Number(minPrice)
-    const max = maxPrice.trim() === '' ? null : Number(maxPrice)
+    const min = parseOptionalNumber(minPrice, { min: 0 })
+    const max = parseOptionalNumber(maxPrice, { min: 0 })
 
     return transformedSales.filter((entry) => {
       if (min !== null && entry.price < min) return false
       if (max !== null && entry.price > max) return false
 
       if (isArtefact) {
-        const minArtifactPtn = minPtn.trim() === '' ? null : Number(minPtn)
-        const maxArtifactPtn = maxPtn.trim() === '' ? null : Number(maxPtn)
+        const minArtifactPtn = parseOptionalNumber(minPtn, { min: 0, max: 15 })
+        const maxArtifactPtn = parseOptionalNumber(maxPtn, { min: 0, max: 15 })
         const qltFilter = quality === '-1' ? null : Number(quality)
 
         if (minArtifactPtn !== null && (entry.ptn ?? -1) < minArtifactPtn) return false
@@ -369,6 +447,28 @@ function ItemDetailPage() {
       max,
       displayMin: min - edgePadding,
       displayMax: max + edgePadding,
+    }
+  }, [filteredSales])
+
+  const yBounds = useMemo(() => {
+    if (!filteredSales.length) {
+      return { min: null, max: null }
+    }
+
+    let min = Number.POSITIVE_INFINITY
+    let max = Number.NEGATIVE_INFINITY
+
+    for (const point of filteredSales) {
+      if (point.y < min) min = point.y
+      if (point.y > max) max = point.y
+    }
+
+    const range = Math.max(1, max - min)
+    const padding = Math.max(1, range * 0.06)
+
+    return {
+      min: min - padding,
+      max: max + padding,
     }
   }, [filteredSales])
 
@@ -442,6 +542,8 @@ function ItemDetailPage() {
           },
         },
         y: {
+          min: yBounds.min !== null ? yBounds.min : undefined,
+          max: yBounds.max !== null ? yBounds.max : undefined,
           grid: { color: '#243143' },
           ticks: {
             color: '#9fb0c7',
@@ -452,7 +554,7 @@ function ItemDetailPage() {
         },
       },
     }
-  }, [xBounds])
+  }, [xBounds, yBounds])
 
   if (isLoading) {
     return <div className="text-secondary text-center py-5">Загрузка...</div>
@@ -466,7 +568,7 @@ function ItemDetailPage() {
     <div className="glass-panel p-3 p-md-4">
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
         <div>
-          <div className="small text-secondary">
+          <div className="small text-secondary mb-2">
             <Link to="/items" className="text-secondary text-decoration-none">Список предметов</Link>
             {categoryCrumbs.map((crumb) => (
               <span key={crumb.path}>
@@ -475,13 +577,13 @@ function ItemDetailPage() {
                   to={`/items?category=${encodeURIComponent(crumb.path)}`}
                   className="text-secondary text-decoration-none"
                 >
-                  {translateCategorySegment(crumb.name)}
+                  {translateCategorySegment(crumb.name, crumb.path)}
                 </Link>
               </span>
             ))}
             {item?.name ? ` < ${item.name}` : ''}
           </div>
-          <div className="d-flex align-items-center gap-2 mt-1">
+          <div className="d-flex align-items-center gap-2">
             <div className="item-icon-frame item-detail-icon-frame" style={{ borderColor: item.color }}>
               <img
                 src={getIconUrl(item)}
@@ -496,7 +598,7 @@ function ItemDetailPage() {
             </div>
             <div>
               <h3 className="mb-0">{item.name}</h3>
-              <div className="small text-secondary">{translateCategoryPath(item.category)} • {item.item_id}</div>
+              <div className="small text-secondary">Класс: {translateCategorySegment(categoryParts[categoryParts.length - 1] || '', item.category) || item.category}</div>
             </div>
           </div>
         </div>
@@ -517,105 +619,179 @@ function ItemDetailPage() {
 
       <div className="row g-2 align-items-stretch mb-2 flex-xl-nowrap">
         <div className="col-16 col-xl">
-          <div className="border border-secondary-subtle rounded-3 p-2">
-            <div className="small text-secondary mb-1">Количество отображаемых записей:</div>
+          <div className="border border-secondary-subtle rounded-3 p-3">
+            <div className="small text-secondary mb-1">Количество отображаемых записей в истории продаж:</div>
             <div className="row g-1 align-items-end">
-              <div className="col-6 col-md-3 col-lg-2">
-                <input
-                  className="form-control form-control-sm"
-                  type="number"
-                  min={2}
-                  max={maxLimit}
-                  value={limitInput}
-                  onChange={(event) => setLimitInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      applyLimit()
-                    }
-                  }}
-                />
+              <div className="col-12 col-md-4 col-lg-2">
+                <div className="input-group input-group-sm">
+                  <input
+                    className="form-control"
+                    type="number"
+                    min={2}
+                    max={maxLimit}
+                    step="1"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={limitInput}
+                    onChange={(event) => setLimitInput(sanitizeDigitsInput(event.target.value))}
+                    onBlur={() => {
+                      const normalized = normalizeDigitsValue(limitInput, { min: 2, max: maxLimit })
+                      if (normalized === '') {
+                        setLimitInput(String(getDefaultLimitValue()))
+                        return
+                      }
+
+                      setLimitInput(normalized)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        applyLimit()
+                      }
+                    }}
+                  />
+                  <button type="button" className="btn btn-outline-secondary" onClick={resetLimitInputToDefault}>x</button>
+                </div>
               </div>
-              <div className="col-6 col-md-3 col-lg-2">
+              <div className="col-12 col-md-3 col-lg-2">
                 <button type="button" className="btn btn-accent btn-sm w-100 d-flex align-items-center justify-content-center" onClick={applyLimit}>Применить</button>
               </div>
               <div className="col-6 col-md-2 col-lg-2">
                 <button
                   type="button"
                   className="btn btn-outline-light btn-sm w-100"
-                  onClick={() => {
-                    setLimitInput('100')
-                    setAppliedLimit(100)
-                  }}
+                  onClick={() => applyPresetLimit(100)}
                 >
-                  100
+                  100 шт.
                 </button>
               </div>
               <div className="col-6 col-md-2 col-lg-2">
                 <button
                   type="button"
                   className="btn btn-outline-light btn-sm w-100"
-                  onClick={() => {
-                    setLimitInput('200')
-                    setAppliedLimit(200)
-                  }}
+                  onClick={() => applyPresetLimit(200)}
                 >
-                  200
+                  200 шт.
                 </button>
               </div>
               <div className="col-6 col-md-2 col-lg-2">
                 <button
                   type="button"
                   className="btn btn-outline-light btn-sm w-100"
-                  onClick={() => {
-                    setLimitInput('2000')
-                    setAppliedLimit(2000)
-                  }}
+                  onClick={() => applyPresetLimit(1000)}
                 >
-                  2000
+                  1000 шт.
                 </button>
               </div>
               <div className="col-6 col-md-2 col-lg-2">
                 <button
                   type="button"
                   className="btn btn-outline-light btn-sm w-100"
-                  onClick={() => {
-                    setLimitInput(String(maxLimit))
-                    setAppliedLimit(maxLimit)
-                  }}
+                  onClick={() => applyPresetLimit(maxLimit)}
                 >
-                  {maxLimit}
+                  {maxLimit} шт.
                 </button>
               </div>
             </div>
           </div>
         </div>
         <div className="col-12 col-xl">
-          <div className="border border-secondary-subtle rounded-3 p-2 h-100">
+          <div className="border border-secondary-subtle rounded-3 p-3 h-100">
             <div className="small text-secondary mb-1">Фильтры записей:</div>
             <div className="row g-1">
-              <div className="col-6 col-md-2">
-                <input className="form-control form-control-sm" placeholder="Цена от" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} />
+              <div className="col-6 col-lg-2">
+                <div className="input-group input-group-sm">
+                  <input
+                    className="form-control"
+                    type="number"
+                    min={0}
+                    step="1"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Цена от"
+                    value={minPrice}
+                    onChange={(event) => setMinPrice(sanitizeDigitsInput(event.target.value))}
+                    onBlur={() => setMinPrice(normalizeDigitsValue(minPrice, { min: 0 }))}
+                  />
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setMinPrice('')}>x</button>
+                </div>
               </div>
-              <div className="col-6 col-md-2">
-                <input className="form-control form-control-sm" placeholder="Цена до" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} />
+              <div className="col-6 col-lg-2">
+                <div className="input-group input-group-sm">
+                  <input
+                    className="form-control"
+                    type="number"
+                    min={0}
+                    step="1"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Цена до"
+                    value={maxPrice}
+                    onChange={(event) => setMaxPrice(sanitizeDigitsInput(event.target.value))}
+                    onBlur={() => setMaxPrice(normalizeDigitsValue(maxPrice, { min: 0 }))}
+                  />
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setMaxPrice('')}>x</button>
+                </div>
               </div>
 
               {isArtefact && (
                 <>
-                  <div className="col-6 col-md-2">
-                    <input className="form-control form-control-sm" placeholder="Уровень от" value={minPtn} onChange={(event) => setMinPtn(event.target.value)} />
+                  <div className="col-6 col-lg-2">
+                    <div className="input-group input-group-sm">
+                      <input
+                        className="form-control"
+                        type="number"
+                        min={0}
+                        max={15}
+                        step="1"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        placeholder="Урв. от"
+                        value={minPtn}
+                        onChange={(event) => setMinPtn(sanitizeDigitsInput(event.target.value))}
+                        onBlur={() => setMinPtn(normalizeDigitsValue(minPtn, { min: 0, max: 15 }))}
+                      />
+                      <button type="button" className="btn btn-outline-secondary" onClick={() => setMinPtn('')}>x</button>
+                    </div>
                   </div>
-                  <div className="col-6 col-md-2">
-                    <input className="form-control form-control-sm" placeholder="Уровень до" value={maxPtn} onChange={(event) => setMaxPtn(event.target.value)} />
+                  <div className="col-6 col-lg-2">
+                    <div className="input-group input-group-sm">
+                      <input
+                        className="form-control"
+                        type="number"
+                        min={0}
+                        max={15}
+                        step="1"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        placeholder="Урв. до"
+                        value={maxPtn}
+                        onChange={(event) => setMaxPtn(sanitizeDigitsInput(event.target.value))}
+                        onBlur={() => setMaxPtn(normalizeDigitsValue(maxPtn, { min: 0, max: 15 }))}
+                      />
+                      <button type="button" className="btn btn-outline-secondary" onClick={() => setMaxPtn('')}>x</button>
+                    </div>
                   </div>
-                  <div className="col-12 col-md-4">
-                    <select className="form-select form-select-sm" value={quality} onChange={(event) => setQuality(event.target.value)}>
-                      <option value="-1">Качество: любое</option>
-                      {Object.entries(QUALITY_LABELS).map(([key, value]) => (
-                        <option value={key} key={key}>{value}</option>
-                      ))}
-                    </select>
+                  <div className="col-12 col-lg">
+                    <div className="input-group input-group-sm">
+                      <select className="form-select quality-filter-select" value={quality} onChange={(event) => setQuality(event.target.value)}>
+                        <option value="-1">Качество: любое</option>
+                        {Object.entries(QUALITY_LABELS).map(([key, value]) => (
+                          <option value={key} key={key}>{value}</option>
+                        ))}
+                      </select>
+                      <button type="button" className="btn btn-outline-secondary" onClick={() => setQuality('-1')}>x</button>
+                    </div>
+                  </div>
+                  <div className="col-12 col-lg-auto">
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm w-100"
+                      title="Очистить все фильтры"
+                      onClick={clearAllFilters}
+                    >
+                      x
+                    </button>
                   </div>
                 </>
               )}
@@ -623,7 +799,7 @@ function ItemDetailPage() {
           </div>
         </div>
         <div className="col-12 col-xl-auto ms-xl-3">
-          <div className="border border-warning-subtle rounded-3 p-2 d-inline-flex flex-column">
+          <div className="border border-warning-subtle rounded-3 p-3 d-inline-flex flex-column">
             <div className="small text-secondary mb-1">Управление графиком</div>
             <button
               type="button"

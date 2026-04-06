@@ -27,6 +27,7 @@ class SaleHistory(models.Model):
     
     class Meta:
         indexes = [
+            models.Index(fields=['item', '-time'], name='sale_item_time_idx'),
             models.Index(fields=['item', 'time', 'price']),
         ]
         constraints = [
