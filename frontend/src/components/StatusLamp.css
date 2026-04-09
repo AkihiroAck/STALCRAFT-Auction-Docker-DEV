@@ -1,0 +1,40 @@
+/* Основной стиль лампочки */
+.status-lamp {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin: 0 4px;
+  box-shadow: 0 0 4px #0002;
+  border: 1.5px solid #8882;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+/* Цвета лампочек:
+   Меняйте background и box-shadow для нужного цвета/эффекта */
+/* Серый, выключено и idle */
+.lamp-off {
+  background: #818181;
+  box-shadow: 0 0 2px #6d6d6d;
+}
+.lamp-success { /* Зеленый */
+  background: #4caf50;
+  box-shadow: 0 0 8px #4caf50cc;
+}
+.lamp-timeout { /* Оранжевый */
+  background: #ff9800;
+  box-shadow: 0 0 8px #ff9800cc;
+}
+.lamp-error { /* Красный */
+  background: #fc2415;
+  box-shadow: 0 0 8px #fc2415cc;
+}
+/* Лампочка загрузки — просто светится (жёлтый, без мигания) */
+.lamp-loading {
+  background: #e9e64a;
+  box-shadow: 0 0 8px #e9e64acc;
+}
+
+@keyframes lamp-pulse {
+  0% { box-shadow: 0 0 8px #2196f3cc; }
+  100% { box-shadow: 0 0 16px #2196f3; }
+}

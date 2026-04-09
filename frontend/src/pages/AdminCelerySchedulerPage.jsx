@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import StatusLamp from '../components/StatusLamp'
 import { Link } from 'react-router-dom'
 import { authLogin, authMe, fetchCeleryOverview, startCeleryTask, stopCeleryTask } from '../api'
 import AdminLoginPanel from '../components/AdminLoginPanel'
@@ -26,15 +27,14 @@ function AdminCelerySchedulerPage() {
 
   const [overview, setOverview] = useState({ pending_tasks: [] })
   const [overviewLoading, setOverviewLoading] = useState(true)
-  const [overviewStatus, setOverviewStatus] = useState('success')
+  // null — статус ещё не получен, иначе: 'success', 'timeout', 'error'
+  const [overviewStatus, setOverviewStatus] = useState(null)
   const [actionStatus, setActionStatus] = useState('')
 
   const isAdmin = authState.authenticated && authState.is_staff
   const hasOverviewLoadedRef = useRef(false)
-  const displayedOverviewStatus = useMemo(() => {
-    if (!overviewLoading) return overviewStatus
-    return overviewStatus === 'timeout' || overviewStatus === 'error' ? overviewStatus : 'loading'
-  }, [overviewLoading, overviewStatus])
+  // Для лампочки статуса: null (ещё не было ответа) — серый, иначе последний статус
+  const displayedOverviewStatus = overviewStatus ?? 'none'
 
   const scheduledTasks = useMemo(
     () => (overview.pending_tasks || []).filter((task) => task.state === 'scheduled'),
@@ -197,11 +197,10 @@ function AdminCelerySchedulerPage() {
           <div className="small text-secondary">Scheduled: {scheduledTasks.length}</div>
           <div className="small text-secondary">Reserved: {reservedTasks.length}</div>
         </div>
-        <div
-          className={`admin-status-dot admin-status-${displayedOverviewStatus}`}
-          role="status"
-          aria-label={`Статус планировщика: ${displayedOverviewStatus}`}
-        />
+        <div className="d-flex align-items-center gap-2">
+          <StatusLamp type="status" value={displayedOverviewStatus} />
+          <StatusLamp type="loading" value={overviewLoading ? 'loading' : 'idle'} />
+        </div>
       </div>
 
       {actionStatus && <div className="alert alert-info mb-0 py-2">{actionStatus}</div>}

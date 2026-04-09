@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import StatusLamp from '../components/StatusLamp'
 import { Link } from 'react-router-dom'
 import {
   authLogin,
@@ -33,7 +34,8 @@ function AdminCeleryTasksPage() {
 
   const [overview, setOverview] = useState({ workers: [], running_tasks: [], pending_tasks: [], manual_tasks: [] })
   const [overviewLoading, setOverviewLoading] = useState(true)
-  const [overviewStatus, setOverviewStatus] = useState('success')
+  // null — статус ещё не получен, иначе: 'success', 'timeout', 'error'
+  const [overviewStatus, setOverviewStatus] = useState(null)
   const [hasOverviewLoaded, setHasOverviewLoaded] = useState(false)
   const [selectedTask, setSelectedTask] = useState('')
   const [logSource, setLogSource] = useState('app')
@@ -42,10 +44,8 @@ function AdminCeleryTasksPage() {
 
   const isAdmin = authState.authenticated && authState.is_staff
   const hasOverviewLoadedRef = useRef(false)
-  const displayedOverviewStatus = useMemo(() => {
-    if (!overviewLoading) return overviewStatus
-    return overviewStatus === 'timeout' || overviewStatus === 'error' ? overviewStatus : 'loading'
-  }, [overviewLoading, overviewStatus])
+  // Для лампочки статуса: null (ещё не было ответа) — серый, иначе последний статус
+  const displayedOverviewStatus = overviewStatus ?? 'none'
   const workersOnline = useMemo(() => {
     const directWorkers = Array.isArray(overview.workers) ? overview.workers.length : 0
     const registeredWorkers = overview.registered_tasks && typeof overview.registered_tasks === 'object'
@@ -267,11 +267,10 @@ function AdminCeleryTasksPage() {
                 <div className="small text-secondary">Running: {overview.running_tasks?.length || 0}</div>
                 <div className="small text-secondary">Pending: {overview.pending_tasks?.length || 0}</div>
               </div>
-              <div
-                className={`admin-status-dot admin-status-${displayedOverviewStatus}`}
-                role="status"
-                aria-label={`Статус Celery: ${displayedOverviewStatus}`}
-              />
+              <div className="d-flex align-items-center gap-2">
+                <StatusLamp type="status" value={displayedOverviewStatus} />
+                <StatusLamp type="loading" value={overviewLoading ? 'loading' : 'idle'} />
+              </div>
             </div>
 
             {actionStatus && <div className="alert alert-info mt-3 mb-0 py-2">{actionStatus}</div>}

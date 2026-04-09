@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import StatusLamp from '../components/StatusLamp'
 import { useNavigate } from 'react-router-dom'
 import { authLogin, authLogout, authMe, fetchCeleryOverview } from '../api'
 import AdminLoginPanel from '../components/AdminLoginPanel'
@@ -27,7 +28,8 @@ function AdminPage() {
 
   const [overview, setOverview] = useState({ workers: [], running_tasks: [], pending_tasks: [], manual_tasks: [] })
   const [overviewLoading, setOverviewLoading] = useState(true)
-  const [overviewStatus, setOverviewStatus] = useState('success')
+  // null — статус ещё не получен, иначе: 'success', 'timeout', 'error'
+  const [overviewStatus, setOverviewStatus] = useState(null)
   const hasOverviewLoadedRef = useRef(false)
 
   const isAdmin = authState.authenticated && authState.is_staff
@@ -44,10 +46,8 @@ function AdminPage() {
     return Math.max(directWorkers, registeredWorkers, statsWorkers)
   }, [overview])
   const periodicCount = (overview.beat_schedule || []).length
-  const displayedOverviewStatus = useMemo(() => {
-    if (!overviewLoading) return overviewStatus
-    return overviewStatus === 'timeout' || overviewStatus === 'error' ? overviewStatus : 'loading'
-  }, [overviewLoading, overviewStatus])
+  // Для лампочки статуса: null (ещё не было ответа) — серый, иначе последний статус
+  const displayedOverviewStatus = overviewStatus ?? 'none'
   const scheduledCount = useMemo(
     () => (overview.pending_tasks || []).filter((task) => task.state === 'scheduled').length,
     [overview]
@@ -203,11 +203,12 @@ function AdminPage() {
                 <div className="small text-secondary">Running: {overview.running_tasks?.length || 0}</div>
                 <div className="small text-secondary">Pending: {overview.pending_tasks?.length || 0}</div>
               </div>
-              <div
-                className={`admin-status-dot admin-status-${displayedOverviewStatus}`}
-                role="status"
-                aria-label={`Статус Celery: ${displayedOverviewStatus}`}
-              />
+              <div className="d-flex align-items-center gap-2">
+                {/* Статус последней загрузки */}
+                <StatusLamp type="status" value={displayedOverviewStatus} />
+                {/* Процесс загрузки */}
+                <StatusLamp type="loading" value={overviewLoading ? 'loading' : 'idle'} />
+              </div>
             </div>
             <button
               type="button"
@@ -229,11 +230,10 @@ function AdminPage() {
                 <div className="small text-secondary">Scheduled: {scheduledCount}</div>
                 <div className="small text-secondary">Reserved: {reservedCount}</div>
               </div>
-              <div
-                className={`admin-status-dot admin-status-${displayedOverviewStatus}`}
-                role="status"
-                aria-label={`Статус планировщика: ${displayedOverviewStatus}`}
-              />
+              <div className="d-flex align-items-center gap-2">
+                <StatusLamp type="status" value={displayedOverviewStatus} />
+                <StatusLamp type="loading" value={overviewLoading ? 'loading' : 'idle'} />
+              </div>
             </div>
             <button
               type="button"
