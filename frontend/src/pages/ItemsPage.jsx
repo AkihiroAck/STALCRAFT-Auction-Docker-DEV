@@ -446,7 +446,7 @@ function ItemsPage() {
                 <Link key={item.item_id} to={`/items/${item.item_id}`} className="item-card text-decoration-none">
                   {item.has_sales ? (
                     <span className="item-sales-indicator" title="Есть записи продаж" aria-label="Есть записи продаж">
-                      <Scale size={12} strokeWidth={2} aria-hidden="true" />
+                      <Scale size={15} strokeWidth={2} aria-hidden="true" />
                     </span>
                   ) : null}
                   <div className="item-card-row">
