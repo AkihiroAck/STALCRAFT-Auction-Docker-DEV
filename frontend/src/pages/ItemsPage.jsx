@@ -188,7 +188,7 @@ function ItemsPage() {
 
   const handleSelectCategory = (categoryPath) => {
     if (!categoryPath || categoryPath === 'all') {
-      navigate('/items')
+      navigate('/items?category=all')
       return
     }
 

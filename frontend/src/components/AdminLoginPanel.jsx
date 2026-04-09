@@ -30,10 +30,12 @@ function AdminLoginPanel({
           <CipherText text="L0-K1" className="cipher-login-text cipher-inline-text text-secondary" scrambleChance={0.1} intervalMs={150} />.
         </p>
 
-        <form className="d-flex flex-column gap-3" onSubmit={onSubmit}>
+        <form className="d-flex flex-column gap-3" onSubmit={onSubmit} autoComplete="off">
           <input
             className="form-control"
             placeholder="U53R_N4M3"
+            name="admin-username"
+            autoComplete="off"
             value={username}
             onChange={(event) => onUsernameChange(event.target.value)}
           />
@@ -41,6 +43,8 @@ function AdminLoginPanel({
             className="form-control"
             type="password"
             placeholder="P4$$_C0D3"
+            name="admin-password"
+            autoComplete="new-password"
             value={password}
             onChange={(event) => onPasswordChange(event.target.value)}
           />

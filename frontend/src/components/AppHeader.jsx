@@ -8,7 +8,7 @@ function AppHeader({ isAdminAuthenticated, onAdminLogin, onAdminCenter, onAdminL
     <header className="topbar border-bottom border-secondary-subtle">
       <div className="container-fluid py-3 px-4 d-flex align-items-center justify-content-between gap-3 flex-wrap topbar-row">
         <div className="d-flex align-items-center gap-4">
-          <Link to="/" className="brand-link" aria-label="STALCRAFT AUCTION">
+          <Link to="/?category=all" className="brand-link" aria-label="STALCRAFT AUCTION">
             <CipherText
               text="STALCRAFT AUCTION"
               className="cipher-text cipher-inline-text brand-cipher-text"
@@ -17,7 +17,7 @@ function AppHeader({ isAdminAuthenticated, onAdminLogin, onAdminCenter, onAdminL
             />
           </Link>
           <nav className="d-flex align-items-center gap-2">
-            <NavLink className="nav-pill" to="/items">Предметы</NavLink>
+            <NavLink className="nav-pill" to="/items?category=all">Предметы</NavLink>
             <NavLink className="nav-pill" to="/upload-lang">AVG to lang</NavLink>
           </nav>
         </div>

@@ -131,7 +131,7 @@ html {
   text-decoration: none;
   font-weight: 700;
   letter-spacing: 0.1em;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   text-transform: uppercase;
   transition: color 160ms ease;
 }
@@ -147,9 +147,9 @@ html {
 
 .brand-link .brand-cipher-text {
   text-shadow:
-    0 0 4px rgba(89, 190, 117, 0.78),
-    0 0 10px rgba(110, 188, 135, 0.62),
-    0 0 18px rgba(89, 240, 138, 0.4);
+    0 0 4px rgba(109, 224, 118, 0.78),
+    0 0 10px rgba(129, 235, 147, 0.62),
+    0 0 18px rgba(117, 238, 155, 0.486);
   transition: text-shadow 160ms ease;
 }
 

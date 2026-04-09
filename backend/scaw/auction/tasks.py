@@ -6,6 +6,9 @@ import requests
 import os
 import json
 import base64
+import gzip
+import zlib
+import brotli
 from dotenv import load_dotenv
 from celery import shared_task
 from auction.models import SaleHistory, Item
@@ -36,6 +39,18 @@ GITHUB_HTTP_HEADERS = {
 
 LISTING_FETCH_TIMEOUT_SECONDS = 30
 LISTING_RETRY_DELAY_SECONDS = 20
+
+
+def _decode_response_body(raw_body: bytes, content_encoding: str) -> bytes:
+    """Декодирует тело ответа с учетом Content-Encoding."""
+    encoding = (content_encoding or '').lower().strip()
+    if encoding == 'br':
+        return brotli.decompress(raw_body)
+    if encoding == 'gzip':
+        return gzip.decompress(raw_body)
+    if encoding == 'deflate':
+        return zlib.decompress(raw_body)
+    return raw_body
 
 def _load_listing_items_with_retry(url: str) -> list[dict]:
     while True:
@@ -104,7 +119,9 @@ async def get_history(item: Item, session: aiohttp.ClientSession, additional: st
     while True:  # Бесконечный цикл для повторных попыток при ошибках
         try:
             async with session.get(url, headers=SC_HEADERS, params=params, timeout=21) as response:
-                response_json = await response.json()
+                raw_body = await response.read()
+                decoded_body = _decode_response_body(raw_body, response.headers.get('Content-Encoding', ''))
+                response_json = json.loads(decoded_body.decode('utf-8'))
                 if response.status != 200:
                     log(f'ERROR: {prefix}{item.name} [{item.item_id}]: Ошибка {response.status} при получении истории. Ответ: {response_json}', save=True)
                     await asyncio.sleep(10)
@@ -146,7 +163,7 @@ def start_get_history():
     async def main():  # Асинхронная функция для обработки пакетов предметов
         nonlocal count  # Используем внешний счетчик
         
-        async with aiohttp.ClientSession() as session:  # Создаем сессию для HTTP-запросов
+        async with aiohttp.ClientSession(auto_decompress=False) as session:  # Декодируем ответ вручную, чтобы корректно обрабатывать br/gzip/deflate
             for offset in range(0, total_items, parallel_limit):  # Итерируем по предметам пакетами
                 sub_batch = items[offset:offset + parallel_limit]  # Текущий пакет предметов
 
