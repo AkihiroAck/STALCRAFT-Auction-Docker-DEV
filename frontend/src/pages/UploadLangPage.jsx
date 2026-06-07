@@ -3,7 +3,7 @@ import { processLangFile } from '../api'
 
 function UploadLangPage() {
   const [file, setFile] = useState(null)
-  const [months, setMonths] = useState(1)
+  const [months, setMonths] = useState(2)  // По умолчанию 2 месяца, можно изменить на 1 или 3
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 

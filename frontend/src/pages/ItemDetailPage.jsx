@@ -366,7 +366,11 @@ function ItemDetailPage() {
         const time = new Date(entry.time)
         const shiftedTs = time.getTime() + timezone * 60 * 60 * 1000
         const qlt = entry.extra_data?.qlt
-        const ptn = entry.extra_data?.ptn
+        const rawPtn = entry.extra_data?.ptn
+        const parsedPtn = Number(rawPtn)
+        const hasNumericPtn = Number.isFinite(parsedPtn)
+        const ptn = hasNumericPtn ? parsedPtn : undefined
+        const ptnFilterValue = hasNumericPtn ? parsedPtn : 0
 
         return {
           x: shiftedTs,
@@ -375,6 +379,7 @@ function ItemDetailPage() {
           price: Number(entry.price),
           qlt,
           ptn,
+          ptnFilterValue,
           extra_data: entry.extra_data || {},
           pointColor: qlt !== undefined ? Object.values(colors)[Math.min(qlt, 6)] : colors[entry.item__color],
           itemName: entry.item__name,
@@ -396,8 +401,8 @@ function ItemDetailPage() {
         const maxArtifactPtn = parseOptionalNumber(maxPtn, { min: 0, max: 15 })
         const qltFilter = quality === '-1' ? null : Number(quality)
 
-        if (minArtifactPtn !== null && (entry.ptn ?? -1) < minArtifactPtn) return false
-        if (maxArtifactPtn !== null && (entry.ptn ?? -1) > maxArtifactPtn) return false
+        if (minArtifactPtn !== null && entry.ptnFilterValue < minArtifactPtn) return false
+        if (maxArtifactPtn !== null && entry.ptnFilterValue > maxArtifactPtn) return false
         if (qltFilter !== null && entry.qlt !== qltFilter) return false
       }
 

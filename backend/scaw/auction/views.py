@@ -489,8 +489,8 @@ def process_lang_file(request):
     if request.method != "POST" or "file" not in request.FILES:
         return HttpResponse("Загрузите файл методом POST с полем 'file'", status=400)
 
-    # Сколько месяцев брать (по умолчанию 1, максимум 3)
-    months = int(request.POST.get("months", 1))
+    # Сколько месяцев брать (по умолчанию 2, максимум 3)
+    months = int(request.POST.get("months", 2))
     months = max(1, min(3, months))
     date_from = timezone.now() - datetime.timedelta(days=30 * months)
 
@@ -503,72 +503,200 @@ def process_lang_file(request):
     names = [line.split("=", 1)[1] for line in lines if "=" in line]
 
     # загрузка Items одним запросом
-    items = Item.objects.filter(name__in=names).values("id", "name")
-    name_to_id = {i["name"]: i["id"] for i in items}
-    if not name_to_id:
+    items = list(Item.objects.filter(name__in=names).values("id", "name", "category"))
+    name_to_item = {i["name"]: i for i in items}
+    if not name_to_item:
         return HttpResponse("В файле нет предметов из базы", status=400)
 
-    # --- основной запрос: средняя цена за N месяцев ---
-    query_avg = """
-        WITH filtered AS (
-            SELECT sh.item_id, sh.price
-            FROM auction_salehistory sh
-            JOIN auction_item i ON sh.item_id = i.id
-            WHERE sh.item_id = ANY(%s)
-              AND sh.time >= %s
-              AND i.category NOT LIKE 'artefact%%'
-        ),
-        bounds AS (
-            SELECT item_id,
-                   percentile_cont(0.25) WITHIN GROUP (ORDER BY price) AS q1,
-                   percentile_cont(0.75) WITHIN GROUP (ORDER BY price) AS q3
-            FROM filtered
-            GROUP BY item_id
-        )
-        SELECT f.item_id, AVG(f.price) AS avg_price
-        FROM filtered f
-        JOIN bounds b ON f.item_id = b.item_id
-        WHERE f.price BETWEEN (b.q1 - 4 * (b.q3 - b.q1))
-                          AND (b.q3 + 4 * (b.q3 - b.q1))
-        GROUP BY f.item_id;
-    """
+    regular_item_ids = []
+    artefact_item_ids = []
+    for item in items:
+        if item["category"].startswith("artefact"):
+            artefact_item_ids.append(item["id"])
+        else:
+            regular_item_ids.append(item["id"])
 
-    with connection.cursor() as cursor:
-        cursor.execute(query_avg, [list(name_to_id.values()), date_from])
-        rows = cursor.fetchall()
+    prices_map = {}
+    artefact_prices_map = {}
+    artefact_qlt_label_map = {
+        0: 'обыч',
+        1: 'необ',
+        2: 'особ',
+        3: 'редк',
+        4: 'искл',
+        5: 'лег',
+    }
 
-    prices_map = {item_id: avg for item_id, avg in rows}
-
-    # --- fallback: последняя продажа до периода ---
-    missing_ids = [i for i in name_to_id.values() if i not in prices_map]
-    if missing_ids:
-        query_last = """
-            SELECT DISTINCT ON (sh.item_id) sh.item_id, sh.price
-            FROM auction_salehistory sh
-            JOIN auction_item i ON sh.item_id = i.id
-            WHERE sh.item_id = ANY(%s)
-              AND sh.time < %s
-              AND i.category NOT LIKE 'artefact%%'
-            ORDER BY sh.item_id, sh.time DESC;
+    # --- обычные предметы: средняя цена за N месяцев ---
+    if regular_item_ids:
+        query_avg_regular = """
+            WITH filtered AS (
+                SELECT sh.item_id, sh.price
+                FROM auction_salehistory sh
+                WHERE sh.item_id = ANY(%s)
+                  AND sh.time >= %s
+            ),
+            bounds AS (
+                SELECT item_id,
+                       percentile_cont(0.25) WITHIN GROUP (ORDER BY price) AS q1,
+                       percentile_cont(0.75) WITHIN GROUP (ORDER BY price) AS q3
+                FROM filtered
+                GROUP BY item_id
+            )
+            SELECT f.item_id, AVG(f.price) AS avg_price
+            FROM filtered f
+            JOIN bounds b ON f.item_id = b.item_id
+            WHERE f.price BETWEEN (b.q1 - 4 * (b.q3 - b.q1))
+                              AND (b.q3 + 4 * (b.q3 - b.q1))
+            GROUP BY f.item_id;
         """
+
         with connection.cursor() as cursor:
-            cursor.execute(query_last, [missing_ids, date_from])
+            cursor.execute(query_avg_regular, [regular_item_ids, date_from])
             rows = cursor.fetchall()
-        for item_id, price in rows:
-            prices_map[item_id] = price  # последняя цена
+
+        prices_map = {item_id: avg for item_id, avg in rows}
+
+        # --- fallback для обычных предметов: последняя продажа до периода ---
+        missing_ids = [item_id for item_id in regular_item_ids if item_id not in prices_map]
+        if missing_ids:
+            query_last_regular = """
+                SELECT DISTINCT ON (sh.item_id) sh.item_id, sh.price
+                FROM auction_salehistory sh
+                WHERE sh.item_id = ANY(%s)
+                  AND sh.time < %s
+                ORDER BY sh.item_id, sh.time DESC;
+            """
+            with connection.cursor() as cursor:
+                cursor.execute(query_last_regular, [missing_ids, date_from])
+                rows = cursor.fetchall()
+            for item_id, price in rows:
+                prices_map[item_id] = price
+
+    # --- артефакты: средняя цена отдельно для qlt=0..5 (только ptn=0 или ptn отсутствует) ---
+    if artefact_item_ids:
+        query_avg_artefact = """
+            WITH filtered AS (
+                SELECT
+                    sh.item_id,
+                    CASE
+                        WHEN sh.extra_data IS NOT NULL
+                         AND sh.extra_data ? 'qlt'
+                         AND (sh.extra_data ->> 'qlt') ~ '^[0-9]+$'
+                        THEN (sh.extra_data ->> 'qlt')::int
+                        ELSE 0
+                    END AS qlt,
+                    sh.price
+                FROM auction_salehistory sh
+                WHERE sh.item_id = ANY(%s)
+                  AND sh.time >= %s
+                  AND (
+                      sh.extra_data IS NULL
+                      OR NOT (sh.extra_data ? 'ptn')
+                      OR sh.extra_data ->> 'ptn' = '0'
+                  )
+            ),
+            normalized AS (
+                SELECT item_id, qlt, price
+                FROM filtered
+                WHERE qlt BETWEEN 0 AND 5
+            ),
+            bounds AS (
+                SELECT
+                    item_id,
+                    qlt,
+                    percentile_cont(0.25) WITHIN GROUP (ORDER BY price) AS q1,
+                    percentile_cont(0.75) WITHIN GROUP (ORDER BY price) AS q3
+                FROM normalized
+                GROUP BY item_id, qlt
+            )
+            SELECT n.item_id, n.qlt, AVG(n.price) AS avg_price
+            FROM normalized n
+            JOIN bounds b
+              ON n.item_id = b.item_id
+             AND n.qlt = b.qlt
+            WHERE n.price BETWEEN (b.q1 - 4 * (b.q3 - b.q1))
+                              AND (b.q3 + 4 * (b.q3 - b.q1))
+            GROUP BY n.item_id, n.qlt;
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(query_avg_artefact, [artefact_item_ids, date_from])
+            rows = cursor.fetchall()
+
+        for item_id, qlt, avg_price in rows:
+            artefact_prices_map.setdefault(item_id, {})[qlt] = avg_price
+
+        # --- fallback для артефактов: последняя продажа до периода для каждого qlt ---
+        missing_artefact_ids = [item_id for item_id in artefact_item_ids if len(artefact_prices_map.get(item_id, {})) < 6]
+        if missing_artefact_ids:
+            query_last_artefact = """
+                SELECT DISTINCT ON (x.item_id, x.qlt) x.item_id, x.qlt, x.price
+                FROM (
+                    SELECT
+                        sh.item_id,
+                        CASE
+                            WHEN sh.extra_data IS NOT NULL
+                             AND sh.extra_data ? 'qlt'
+                             AND (sh.extra_data ->> 'qlt') ~ '^[0-9]+$'
+                            THEN (sh.extra_data ->> 'qlt')::int
+                            ELSE 0
+                        END AS qlt,
+                        sh.price,
+                        sh.time
+                    FROM auction_salehistory sh
+                    WHERE sh.item_id = ANY(%s)
+                      AND sh.time < %s
+                      AND (
+                          sh.extra_data IS NULL
+                          OR NOT (sh.extra_data ? 'ptn')
+                          OR sh.extra_data ->> 'ptn' = '0'
+                      )
+                ) AS x
+                WHERE x.qlt BETWEEN 0 AND 5
+                ORDER BY x.item_id, x.qlt, x.time DESC;
+            """
+
+            with connection.cursor() as cursor:
+                cursor.execute(query_last_artefact, [missing_artefact_ids, date_from])
+                rows = cursor.fetchall()
+
+            for item_id, qlt, price in rows:
+                if qlt not in artefact_prices_map.setdefault(item_id, {}):
+                    artefact_prices_map[item_id][qlt] = price
 
     # --- сборка выходного файла ---
     for line in lines:
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        item_id = name_to_id.get(value)
-        if not item_id:
+        item = name_to_item.get(value)
+        if not item:
             continue
-        avg_price = prices_map.get(item_id)
-        if avg_price:
-            formatted_price = f"{int(avg_price):,}".replace(",", " ")
-            output_lines.append(f"{key}={value}\\n{formatted_price} руб.")
+
+        item_id = item["id"]
+        is_artefact = item["category"].startswith("artefact")
+
+        if is_artefact:
+            qlt_prices = artefact_prices_map.get(item_id, {})
+
+            artifact_lines = [f"{key}={value}"]
+            for qlt in range(0, 6):
+                avg_price = qlt_prices.get(qlt)
+                qlt_label = artefact_qlt_label_map.get(qlt, str(qlt))
+                if avg_price is None:
+                    formatted_price = '---'
+                else:
+                    formatted_price = f"{int(avg_price):,}".replace(",", " ")
+                artifact_lines.append(f"{formatted_price} руб ({qlt_label})")
+
+            if len(artifact_lines) > 1:
+                output_lines.append("\\n".join(artifact_lines))
+        else:
+            avg_price = prices_map.get(item_id)
+            if avg_price:
+                formatted_price = f"{int(avg_price):,}".replace(",", " ")
+                output_lines.append(f"{key}={value}\\n{formatted_price} руб.")
 
     response = HttpResponse("\n".join(output_lines), content_type="text/plain; charset=utf-8")
     response["Content-Disposition"] = 'attachment; filename="ru.lang"'
